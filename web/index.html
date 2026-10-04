@@ -52,6 +52,7 @@
       <div class="demo-hint" id="demo-hint" hidden></div>
     </div>
     <p class="auth-foot">Сервер: <code id="server-url">—</code> · <span id="server-status">подключение…</span></p>
+    <p class="auth-version" id="auth-version">версия клиента: …</p>
   </div>
 </div>
 
@@ -238,8 +239,13 @@
 <div id="lightbox" class="lightbox" hidden><img id="lightbox-img" alt=""><button class="icon-btn" id="lightbox-close">✕</button></div>
 
 <div id="offline-banner" class="offline-banner" hidden>⚡️ Нет соединения с сервером — сообщения отправятся автоматически</div>
+<div id="stale-banner" class="stale-banner" hidden>
+  <span id="stale-text">Обновилась версия — загрузите страницу заново</span>
+  <button class="btn sm primary" id="stale-reload">Обновить сейчас</button>
+</div>
 <div id="drag-overlay" class="drag-overlay" hidden><div>📎 Отпустите, чтобы прикрепить</div></div>
 
+<script src="/js/build-info.js"></script>
 <script src="/js/emoji-data.js"></script>
 <script src="/js/app.js"></script>
 <script src="/js/call.js"></script>

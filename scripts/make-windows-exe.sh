@@ -16,7 +16,9 @@ cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
 STAGE="$ROOT/build/staging"          # временная папка (в git не попадает)
 
-echo "▶︎ Подготовка staging…"
+VERSION="$(node -p "require('./package.json').version" 2>/dev/null || echo 1.0.0)"
+BUILD_DATE="$(date +%Y-%m-%d)"
+echo "▶︎ Подготовка staging… (версия $VERSION, сборка $BUILD_DATE)"
 rm -rf "$STAGE"; mkdir -p "$STAGE" release
 mkdir -p "$STAGE/server" "$STAGE/web"
 
@@ -27,10 +29,20 @@ cp -r server/src "$STAGE/server/src"
 cp -r web/. "$STAGE/web/"
 cp launcher/src/main.js "$STAGE/launcher.js"
 
-cat > "$STAGE/package.json" <<'JSON'
+# версия «зашивается» внутрь сборки, чтобы её было видно и в .exe, и в браузере
+cat > "$STAGE/server/src/version.js" <<JS
+'use strict';
+module.exports = { version: '$VERSION', builtAt: '$BUILD_DATE', label: '$VERSION (сборка $BUILD_DATE)' };
+JS
+cat > "$STAGE/web/js/build-info.js" <<JS
+// Версия клиента (генерируется при сборке)
+window.KONTUR_BUILD = { version: '$VERSION', date: '$BUILD_DATE' };
+JS
+
+cat > "$STAGE/package.json" <<JSON
 {
   "name": "kontur-server",
-  "version": "1.0.0",
+  "version": "$VERSION",
   "description": "Мессенджер «Контур» — сервер и веб-клиент в одном .exe",
   "bin": "launcher.js",
   "main": "launcher.js",
@@ -69,11 +81,15 @@ cd "$ROOT"
 echo "▶︎ Кладу рядом веб-клиент и инструкцию…"
 rm -rf release/web; cp -r web release/web
 [ -f README-KLIENT.txt ] && cp README-KLIENT.txt release/ || true
+[ -f scripts/reset-data.bat ] && cp scripts/reset-data.bat release/ОЧИСТИТЬ-ДАННЫЕ.bat || true
+[ -f scripts/reset-data.js ] && cp scripts/reset-data.js release/reset-data.js || true
 
 echo ""
 echo "✅ Готово!"
 ls -lh release/KonturServer.exe | awk '{print "   release/KonturServer.exe — " $5}'
 echo "   release/web/  — веб-клиент (та же папка, что отдаёт сервер)"
+echo "   release/ОЧИСТИТЬ-ДАННЫЕ.bat — двойной клик = полная зачистка базы"
+echo "   версия сборки: $VERSION ($BUILD_DATE)"
 echo ""
 echo "Как это работает на Windows:"
 echo "   1) копируете папку release на компьютер с Windows (или только .exe — клиент распакуется сам);"

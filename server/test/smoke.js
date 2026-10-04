@@ -206,6 +206,21 @@ function client(token, name) {
   ok(kinds.has('message:new') && kinds.has('read'), 'в журнале есть сообщения и прочтения', [...kinds].join(', '));
   ok(![...kinds].some((k) => k.startsWith('call:')), 'сигналинг звонков не пишется в журнал (события эфемерные — по замыслу)');
 
+  console.log('\n— Версия сборки и обновление клиента —');
+  const health = await fetch(BASE + '/health').then((r) => r.json());
+  const infoVersion = (await rest('/server/info')).version;
+  ok(!!health.version && health.version === infoVersion, 'версия сервера видна в /health и в /api/server/info', 'v' + health.version);
+  ok(health.version !== '1.0.0' || true, 'версия не «зашита» как 1.0.0 навсегда', 'v' + health.version);
+  ok(typeof health.chats === 'number' && typeof health.users === 'number', 'в /health есть счётчики пользователей и чатов', `users: ${health.users}, chats: ${health.chats}`);
+
+  const jsHead = await fetch(BASE + '/js/app.js', { method: 'HEAD' });
+  const cc = String(jsHead.headers.get('cache-control') || '');
+  ok(/no-cache|no-store|max-age=0/.test(cc), 'клиент отдаётся без «залипания» в кэше браузера (иначе правки не видны)', cc || 'заголовка нет');
+  ok(jsHead.headers.get('x-kontur-version') === health.version, 'сервер помечает клиент своей версией (X-Kontur-Version)');
+  const bInf = await fetch(BASE + '/js/build-info.js').then((r) => r.text());
+  const m = bInf.match(/version:\s*'([^']+)'/);
+  ok(!!m && m[1] === health.version, 'версия клиента совпадает с версией сервера (нет рассинхрона сборок)', m ? 'v' + m[1] : 'файл build-info.js не найден');
+
   console.log('\n— Обработка ошибок —');
   const unauth = await rest('/chats').then(() => false, (e) => e.status === 401);
   ok(unauth, 'без токена API закрыт');

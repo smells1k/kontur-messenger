@@ -1302,7 +1302,10 @@
         });
         fillDeviceList();
         api('/server/info').then((info) => {
-          $('#s-info').innerHTML = `Сервер: <b>${esc(info.name)}</b> v${esc(info.version)} · пользователей: ${info.users}, чатов: ${info.chats}, сообщений: ${info.messages}<br>Событий синхронизации: ${S.seq} · задержка: ${conn.ping} мс`;
+          const same = String(info.version) === String(BUILD.version);
+          $('#s-info').innerHTML = `Сервер: <b>${esc(info.name)}</b> v${esc(info.version)} · пользователей: ${info.users}, чатов: ${info.chats}, сообщений: ${info.messages}<br>`
+            + `Клиент: v${esc(BUILD.version)}${BUILD.date ? ' (сборка ' + esc(BUILD.date) + ')' : ''}${same ? ' · совпадает с сервером ✅' : ' · ⚠️ версии разные: обновите страницу (Ctrl+F5)'}<br>`
+            + `Событий синхронизации: ${S.seq} · задержка: ${conn.ping} мс`;
         }).catch(() => {});
       });
   }
@@ -1948,10 +1951,39 @@
     if ('Notification' in window && Notification.permission === 'default') setTimeout(askNotifyPermission, 4000);
   }
 
+  /** Версия этого клиента (файл build-info.js) и сервера — чтобы поймать старый кэш. */
+  const BUILD = window.KONTUR_BUILD || { version: 'неизвестно', date: '' };
+  function checkBuild(info) {
+    const clientVer = String(BUILD.version || '');
+    const serverVer = String((info && info.version) || '');
+    const banner = $('#stale-banner');
+    const online = () => {
+      S.serverVersion = serverVer;
+      const v = $('#auth-version');
+      if (v) v.textContent = `версия клиента: ${clientVer}${BUILD.date ? ' · сборка ' + BUILD.date : ''}`;
+    };
+    if (clientVer && serverVer && clientVer !== serverVer) {
+      if (banner) {
+        banner.hidden = false;
+        $('#stale-text').textContent = `Сервер обновлён до v${serverVer}, а в браузере загружен клиент v${clientVer} — это старый кэш. Обновите страницу.`;
+      }
+      online();
+      return;
+    }
+    if (banner) banner.hidden = true;
+    online();
+  }
+  function bindStaleReload() {
+    const btn = $('#stale-reload');
+    if (btn) btn.onclick = () => { try { location.reload(true); } catch { location.reload(); } };
+  }
+
   async function init() {
     applyTheme();
+    bindStaleReload();
     try {
       const info = await api('/server/info');
+      checkBuild(info);
       $('#server-url').textContent = location.host || 'localhost';
       $('#server-status').textContent = `сервер на связи · v${info.version}`;
       S.demoMode = !!info.demoMode;
@@ -1965,6 +1997,8 @@
     } catch {
       $('#server-status').textContent = 'сервер недоступен';
       $('#server-url').textContent = location.host || 'localhost';
+      const v = $('#auth-version');
+      if (v) v.textContent = `версия клиента: ${BUILD.version}${BUILD.date ? ' · сборка ' + BUILD.date : ''}`;
     }
     bindUI();
     window.addEventListener('beforeunload', () => { try { conn.ws && conn.ws.close(); } catch {} });

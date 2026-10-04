@@ -35,8 +35,11 @@ const ROOT = path.resolve(__dirname, '..');
 // Включить для показа:  node server.js --demo   (или DEMO=1)
 const DEMO_MODE = (argv.includes('--demo') || process.env.DEMO === '1') && !argv.includes('--no-demo');
 
+const { version: BUILD_VERSION, builtAt: BUILD_DATE } = require('./src/version');
+
 const config = {
-  version: '1.0.0',
+  version: BUILD_VERSION,
+  buildDate: BUILD_DATE,
   serverName: String(flag('name', process.env.SERVER_NAME || 'Мессенджер «Контур»')),
   port: Number(flag('port', process.env.PORT || 4000)),
   host: String(flag('host', process.env.HOST || '0.0.0.0')),
@@ -50,6 +53,32 @@ const config = {
   openBrowser: argv.includes('--open'),
 };
 config.uploadDir = path.join(config.dataDir, 'uploads');
+
+/**
+ * Полная зачистка сервера: удаляет базу, загруженные файлы и сертификаты.
+ * Запуск:  node server.js --fresh   (или KonturServer.exe --fresh)
+ */
+if (argv.includes('--fresh') && !argv.includes('--no-fresh')) {
+  const keepSecret = argv.includes('--keep-secret');
+  const removed = [];
+  try {
+    for (const entry of fs.readdirSync(config.dataDir)) {
+      if (keepSecret && entry === 'secret.key') continue;
+      fs.rmSync(path.join(config.dataDir, entry), { recursive: true, force: true });
+      removed.push(entry);
+    }
+  } catch (err) {
+    console.error('⚠️  Не удалось очистить папку данных:', err.message);
+  }
+  console.log('');
+  console.log('  🧹 Зачистка базы (флаг --fresh)');
+  console.log('     Папка:      ' + config.dataDir);
+  console.log('     Удалено:    ' + (removed.length ? removed.join(', ') : 'нечего удалять — было пусто'));
+  console.log('     Сервер стартует с нуля: пользователей, чатов и файлов нет.');
+  console.log('     Дальше запускай без --fresh, иначе база будет стираться каждый раз.');
+  console.log('');
+}
+
 fs.mkdirSync(config.dataDir, { recursive: true });
 
 /* -------------------------------------------------------------------- секрет */
@@ -137,13 +166,35 @@ if (botUser) {
 
 app.use('/api', createApi({ core, store, secret, config }));
 
-app.get('/health', (req, res) => res.json({ ok: true, uptime: process.uptime(), users: Object.keys(store.data.users).length, seq: store.seq }));
+app.get('/health', (req, res) => res.json({
+  ok: true,
+  name: config.serverName,
+  version: config.version,
+  build: config.buildDate || '',
+  uptime: process.uptime(),
+  users: Object.keys(store.data.users).length,
+  chats: Object.keys(store.data.chats || {}).length,
+  seq: store.seq,
+  demoMode: config.demoMode,
+}));
 
 /* --------------------------------------------------------------- статика веб */
 
 const indexFile = path.join(config.webDir, 'index.html');
-app.use('/uploads', express.static(config.uploadDir, { maxAge: '7d', fallthrough: true }));
-app.use(express.static(config.webDir, { etag: true, maxAge: '1h', index: 'index.html' }));
+// Загруженные файлы неизменяемы — их можно кэшировать надолго.
+app.use('/uploads', express.static(config.uploadDir, { etag: true, maxAge: '7d', fallthrough: true }));
+// Клиент — всегда перепроверяем у сервера (ETag → 304, если не менялся):
+// после обновления сервера в браузере сразу видна новая версия, а не старый кэш.
+app.use(express.static(config.webDir, {
+  etag: true,
+  lastModified: true,
+  maxAge: 0,
+  index: 'index.html',
+  setHeaders(res) {
+    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    res.setHeader('X-Kontur-Version', config.version);
+  },
+}));
 app.use((req, res, next) => {
   if (req.method !== 'GET' || req.path.startsWith('/api') || req.path.startsWith('/ws')) return next();
   res.set('Cache-Control', 'no-cache');
@@ -161,7 +212,7 @@ server.listen(config.port, config.host, () => {
     console.log('  ┌─────────────────────────────────────────────────────┐');
     console.log('  │  💬  ' + config.serverName.padEnd(44) + ' │');
     console.log('  └─────────────────────────────────────────────────────┘');
-    console.log(`   Версия:      ${config.version}  (Node ${process.version})`);
+    console.log(`   Версия:      ${config.version}${config.buildDate ? ' (сборка ' + config.buildDate + ')' : ''}  ·  Node ${process.version}`);
     console.log(`   Локально:    ${scheme}://localhost:${config.port}`);
     for (const ip of addresses) console.log(`   В сети:      ${scheme}://${ip}:${config.port}   ← открой у друзей в той же сети`);
     console.log(`   WebSocket:   ${wsScheme}://localhost:${config.port}/ws`);
@@ -174,6 +225,8 @@ server.listen(config.port, config.host, () => {
       console.log('      Чтобы звонить с телефона/другого ПК, запусти с флагом --https.');
     }
     console.log(`   Данные:      ${config.dataDir}`);
+    console.log('   Очистить всё: запусти один раз с флагом --fresh — база, файлы и');
+    console.log('      настройки удалятся, сервер начнёт с чистого листа.');
     if (seeded && !seeded.skipped) {
       console.log('');
       console.log('   🧪 Демо-режим: аккаунты anya, boris, vera, gleb (пароль demo1234) · бот @bot');
@@ -187,7 +240,7 @@ server.listen(config.port, config.host, () => {
     console.log('');
   }
   if (config.openBrowser) {
-    const url = `http://localhost:${config.port}`;
+    const url = `${config.https ? 'https' : 'http'}://localhost:${config.port}`;
     const cmd = process.platform === 'win32' ? `start "" "${url}"` : process.platform === 'darwin' ? `open "${url}"` : `xdg-open "${url}"`;
     require('child_process').exec(cmd, () => {});
   }

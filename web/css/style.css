@@ -464,3 +464,13 @@ mark { background: rgba(255, 200, 60, .35); color: inherit; border-radius: 4px; 
 .avatar-upload { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .settings-avatar { display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .settings-avatar .avatar { cursor: pointer; }
+
+/* ------------------------- версия клиента и устаревший кэш ------------------------- */
+.auth-version { margin: 6px 0 0; font-size: 11.5px; opacity: 0.55; text-align: center; letter-spacing: 0.2px; }
+.stale-banner {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: 18px; z-index: 90;
+  display: flex; align-items: center; gap: 12px; padding: 10px 14px;
+  background: linear-gradient(135deg, #6c8cff, #a06bff); color: #fff;
+  border-radius: 12px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45); font-size: 13.5px;
+}
+.stale-banner .btn.sm { padding: 5px 10px; }

@@ -257,6 +257,13 @@ async function rest(path, { method = 'GET', body, token } = {}) {
   window.K.S.settings.theme = 'dark';
   window.localStorage.setItem('k.settings', JSON.stringify(window.K.S.settings));
 
+  console.log('\n— Версия и обновление —');
+  ok(!!$('#stale-banner'), 'есть плашка «клиент устарел — обновите страницу»');
+  ok(!!$('#auth-version'), 'на экране входа показана версия клиента');
+  ok(!!$('script[src="/js/build-info.js"]'), 'страница подключает файл с версией сборки');
+  ok($('#s-info').innerHTML.includes('Клиент: v'), 'в настройках видно версию клиента и сборку');
+  ok(!!(window.KONTUR_BUILD && window.KONTUR_BUILD.version), 'в браузере известна версия клиента', window.KONTUR_BUILD && window.KONTUR_BUILD.version);
+
   console.log('\n— Звонки —');
   ok(!!(window.K.calls && window.K.calls.start), 'модуль звонков подключён');
   const callSrc = require('fs').readFileSync(__dirname + '/../../web/js/call.js', 'utf8');
