@@ -6,6 +6,9 @@ on:
     tags: ['v*']                # поставить тег v1.0.0 → соберётся релиз с .exe
   pull_request:
 
+permissions:
+  contents: write
+
 jobs:
   test-and-build:
     runs-on: ubuntu-latest
@@ -60,4 +63,5 @@ jobs:
             release/KonturServer.exe
             release/README-KLIENT.txt
           draft: false
+          allowUpdates: true
           generate_release_notes: true
