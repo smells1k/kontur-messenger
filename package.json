@@ -1,6 +1,6 @@
 {
   "name": "kontur-messenger",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "private": true,
   "description": "Мессенджер на Node.js: сервер, веб-клиент, .exe для Windows. Текст, файлы, видео, эмодзи, группы, синхронизация",
   "scripts": {

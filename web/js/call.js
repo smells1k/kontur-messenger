@@ -67,11 +67,12 @@
 
   /* ------------------------------------------------------------- окружение */
 
-  function mediaSupportProblem(kind) {
+  function mediaSupportProblem() {
+    if (K.mediaProblem) return K.mediaProblem();   // единый текст и решение (см. app.js)
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       const insecure = location.protocol !== 'https:' && !['localhost', '127.0.0.1', '::1'].includes(location.hostname);
       return insecure
-        ? 'Браузер запрещает доступ к камере и микрофону по http:// вне localhost. Запустите сервер с флагом --https (тогда откроется https://…) или пользуйтесь приложением на этом компьютере.'
+        ? 'Браузер запрещает доступ к камере и микрофону по http:// вне localhost. Запустите сервер с флагом --https (тогда откроется https://…) или запустите приложение: KonturServer.exe --server ' + location.origin + '.'
         : 'Этот браузер не умеет работать с камерой и микрофоном (нужен Chrome, Edge, Firefox или Safari).';
     }
     if (!window.RTCPeerConnection) return 'Браузер не поддерживает WebRTC — звонки недоступны.';

@@ -215,6 +215,7 @@ server.listen(config.port, config.host, () => {
     console.log(`   Версия:      ${config.version}${config.buildDate ? ' (сборка ' + config.buildDate + ')' : ''}  ·  Node ${process.version}`);
     console.log(`   Локально:    ${scheme}://localhost:${config.port}`);
     for (const ip of addresses) console.log(`   В сети:      ${scheme}://${ip}:${config.port}   ← открой у друзей в той же сети`);
+    if (addresses.length) console.log('      (если друзья в той же сети не заходят — разрешите мессенджер в брандмауэре Windows для частных сетей)');
     console.log(`   WebSocket:   ${wsScheme}://localhost:${config.port}/ws`);
     if (config.https) {
       console.log('   🔒 HTTPS включён: сертификат самоподписанный → браузер один раз спросит');
@@ -224,6 +225,9 @@ server.listen(config.port, config.host, () => {
       console.log('   ℹ️  Голос/видео из браузера доступны только на этом компьютере (localhost).');
       console.log('      Чтобы звонить с телефона/другого ПК, запусти с флагом --https.');
     }
+    console.log('   Из интернета: KonturServer.exe --tunnel   ← даст ссылку https://… ,');
+    console.log('      она работает из любой сети, и камера с микрофоном там разрешены.');
+    console.log('      Из исходников: cloudflared tunnel --url http://localhost:' + config.port);
     console.log(`   Данные:      ${config.dataDir}`);
     console.log('   Очистить всё: запусти один раз с флагом --fresh — база, файлы и');
     console.log('      настройки удалятся, сервер начнёт с чистого листа.');

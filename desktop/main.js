@@ -196,6 +196,21 @@ function setupPermissions() {
 
 /* ----------------------------------------------------------------------- старт */
 app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer');
+
+// В окне-приложении разрешения на камеру, микрофон и демонстрацию экрана выдаются сами,
+// но Chromium всё равно требует «доверенный» адрес. Если сервер в локальной сети открыт
+// по обычному http (например http://192.168.1.10:4000) — помечаем этот адрес доверенным,
+// иначе браузер молча блокирует доступ к устройствам.
+try {
+  // адрес сервера читаем прямо с диска: настройки применяются после старта, а флаг нужен раньше
+  let serverUrl = (config && config.serverUrl) || '';
+  try { serverUrl = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'config.json'), 'utf8')).serverUrl || serverUrl; } catch { /* настроек ещё нет */ }
+  const u = new URL(serverUrl);
+  const isLocal = /^(localhost|127\.0\.0\.1|\[::1\])$/i.test(u.hostname);
+  if (u.protocol === 'http:' && !isLocal) {
+    app.commandLine.appendSwitch('unsafely-treat-insecure-origin-as-secure', u.origin);
+  }
+} catch { /* адрес ещё не задан — обычный запуск */ }
 if (!app.requestSingleInstanceLock()) { app.quit(); } else {
   app.on('second-instance', () => { if (mainWindow) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.focus(); } });
 }

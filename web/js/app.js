@@ -1215,6 +1215,7 @@
           </div>
           <div class="mic-meter" id="d-meter" hidden><i></i></div>
           <div class="muted-text" id="d-hint" style="margin-top:6px">Устройства выбираются для звонков. Список подтянется после разрешения доступа.</div>
+          <div class="warn-box" id="d-problem" hidden></div>
         </div>
         <div class="panel-section">
           <h4>Служебное</h4>
@@ -1229,6 +1230,13 @@
       </div>
       <div class="modal-foot"><button class="btn ghost" id="m-close2">Закрыть</button><button class="btn primary" id="s-save">Сохранить</button></div>`,
       (box) => {
+        const problem = mediaProblem();
+        if (problem) {
+          const el = $('#d-problem');
+          if (el) { el.textContent = problem; el.hidden = false; }
+          const hint = $('#d-hint');
+          if (hint) hint.hidden = true;
+        }
         let avatar = S.me ? S.me.avatar : null;
         const avPreview = $('#s-avatar-preview');
         if (avPreview) avPreview.innerHTML = avatarHTML(S.me, 'lg', true);
@@ -1949,6 +1957,32 @@
     connect();
     loadChats();
     if ('Notification' in window && Notification.permission === 'default') setTimeout(askNotifyPermission, 4000);
+    const mp = mediaProblem();
+    if (mp && !sessionStorage.getItem('k.media-warned')) {
+      sessionStorage.setItem('k.media-warned', '1');
+      setTimeout(() => toast('⚠️ Камера и микрофон на этом адресе заблокированы браузером — звонки не сработают. Подробности и решение: Настройки → «Звук и видео».', 'err', 12000), 1500);
+    }
+  }
+
+  /**
+   * Почему браузер может не дать доступ к камере/микрофону и что с этим делать.
+   * Возвращает null, если всё в порядке. Текст один на весь клиент (см. call.js).
+   */
+  function mediaProblem() {
+    const hasMedia = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+    const host = location.hostname;
+    const isLocal = ['localhost', '127.0.0.1', '::1'].includes(host);
+    const secure = location.protocol === 'https:' || isLocal;
+    if (hasMedia && window.RTCPeerConnection) return null;
+    if (!secure) {
+      return 'Браузер блокирует камеру, микрофон и демонстрацию экрана на этом адресе: '
+        + `«${location.origin}» — это не localhost и не HTTPS. Разрешение даже не спрашивается, это защита браузера. `
+        + 'Как исправить: 1) на компьютере, где запущен сервер, нажмите Ctrl+C и запустите KonturServer.exe --https, '
+        + `затем откройте https://${location.host} и один раз подтвердите сертификат («Дополнительно» → «Перейти на сайт»); `
+        + `2) либо у себя запустите KonturServer.exe --server ${location.origin} — откроется окно-приложение с уже выданными разрешениями.`;
+    }
+    if (!hasMedia) return 'Этот браузер не умеет работать с камерой и микрофоном — откройте мессенджер в Chrome, Edge, Firefox или Safari.';
+    return 'Браузер не поддерживает WebRTC — звонки недоступны.';
   }
 
   /** Версия этого клиента (файл build-info.js) и сервера — чтобы поймать старый кэш. */
@@ -2006,7 +2040,7 @@
     if (location.hash === '#demo' && !S.token && S.demoMode) $('#btn-demo').click();
   }
 
-  window.K = { S, api, toast, beep, avatarHTML, esc, markup, initials, shade, fmtTime, fmtDay, fmtBytes, fmtDuration, previewText, getChat, getList, renderChats, renderPanel, renderChatHeader, upsertChat, api_: api, uploadFile, openChat, renderMessages, scrollToBottom, loadContextAround, mergeMessages, togglePanel, toggleEmoji, postMessage, fillDeviceList, openSettings };
+  window.K = { S, api, toast, beep, avatarHTML, esc, markup, initials, shade, fmtTime, fmtDay, fmtBytes, fmtDuration, previewText, getChat, getList, renderChats, renderPanel, renderChatHeader, upsertChat, api_: api, uploadFile, openChat, renderMessages, scrollToBottom, loadContextAround, mergeMessages, togglePanel, toggleEmoji, postMessage, fillDeviceList, openSettings, mediaProblem };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 })();
