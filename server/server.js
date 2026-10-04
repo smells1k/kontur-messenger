@@ -30,6 +30,11 @@ function flag(name, def) {
 }
 
 const ROOT = path.resolve(__dirname, '..');
+
+// Демо-режим (демо-аккаунты, бот, готовые чаты) по умолчанию ВЫКЛЮЧЕН.
+// Включить для показа:  node server.js --demo   (или DEMO=1)
+const DEMO_MODE = (argv.includes('--demo') || process.env.DEMO === '1') && !argv.includes('--no-demo');
+
 const config = {
   version: '1.0.0',
   serverName: String(flag('name', process.env.SERVER_NAME || 'Мессенджер «Контур»')),
@@ -37,8 +42,8 @@ const config = {
   host: String(flag('host', process.env.HOST || '0.0.0.0')),
   dataDir: path.resolve(String(flag('data', process.env.DATA_DIR || path.join(ROOT, 'data')))),
   webDir: path.resolve(String(flag('web', process.env.WEB_DIR || path.join(ROOT, 'web')))),
-  demoMode: !argv.includes('--no-demo') && process.env.DEMO !== '0',
-  autoSeed: !argv.includes('--no-seed') && process.env.AUTO_SEED !== '0',
+  demoMode: DEMO_MODE,
+  autoSeed: DEMO_MODE && !argv.includes('--no-seed'),
   registrationOpen: !argv.includes('--closed') && process.env.REGISTRATION_OPEN !== '0',
   maxUploadMb: Number(flag('max-upload', process.env.MAX_UPLOAD_MB || 100)),
   quiet: argv.includes('--quiet'),
@@ -122,8 +127,13 @@ server.listen(config.port, config.host, () => {
     console.log(`   Данные:      ${config.dataDir}`);
     if (seeded && !seeded.skipped) {
       console.log('');
-      console.log('   🔑 Демо-аккаунты (пароль: demo1234): anya, boris, vera, gleb  ·  бот: @bot');
+      console.log('   🧪 Демо-режим: аккаунты anya, boris, vera, gleb (пароль demo1234) · бот @bot');
       console.log('      Или нажми «Демо-вход» прямо на странице входа.');
+      console.log('      Обычный режим без демо — запусти без флага --demo.');
+    } else {
+      console.log('');
+      console.log('   👤 База пустая: на странице входа нажми «Регистрация» —');
+      console.log('      аккаунт создаётся за 5 секунд. Демо-чатов и ботов нет.');
     }
     console.log('');
   }

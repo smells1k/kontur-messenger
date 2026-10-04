@@ -55,7 +55,9 @@ function client(token, name) {
 (async () => {
   console.log('\n— Информация о сервере —');
   const info = await rest('/server/info');
+  const demoEnabled = !!info.demoMode;
   ok(info.ok && info.name, 'сервер отвечает', `${info.name} v${info.version}, пользователей: ${info.users}, сообщений: ${info.messages}`);
+  console.log(`   режим: ${demoEnabled ? 'демо (--demo)' : 'обычный, без демо-данных'}`);
 
   console.log('\n— Регистрация и вход —');
   const suffix = Math.random().toString(36).slice(2, 7);
@@ -66,8 +68,24 @@ function client(token, name) {
   ok(!!login.token, 'вход по паролю');
   const badLogin = await rest('/auth/login', { method: 'POST', body: { username: a.user.username, password: 'nope' } }).then(() => false, (e) => e.status === 401);
   ok(badLogin, 'неверный пароль отклонён');
-  const demo = await rest('/auth/demo', { method: 'POST', body: {} });
-  ok(!!demo.token && demo.demoAccounts.length > 0, 'демо-вход', demo.user.displayName);
+  if (demoEnabled) {
+    const demo = await rest('/auth/demo', { method: 'POST', body: {} });
+    ok(!!demo.token && demo.demoAccounts.length > 0, 'демо-вход работает (сервер запущен с --demo)', demo.user.displayName);
+  } else {
+    const off = await rest('/auth/demo', { method: 'POST', body: {} }).then(() => false, (e) => e.status === 403);
+    ok(off, 'демо-вход выключен в обычном режиме (403)');
+  }
+
+  console.log('\n— Стартовое состояние нового пользователя —');
+  const startChats = await rest('/chats', { token: a.token });
+  if (demoEnabled) {
+    console.log(`   (демо-режим: у аккаунта ${startChats.chats.length} готовых чатов — так и задумано)`);
+  } else {
+    ok(startChats.chats.length === 0, 'никаких демо-чатов: у нового аккаунта чистый список', startChats.chats.length + ' чатов');
+    const users = await rest('/users', { token: a.token });
+    const demoPeople = users.users.filter((u) => /^(anya|boris|vera|gleb|bot)$/.test(u.username));
+    ok(demoPeople.length === 0, 'демо-пользователей и бота в базе нет', demoPeople.map((u) => u.username).join(', ') || 'чисто');
+  }
 
   console.log('\n— WebSocket, синхронизация —');
   const ca = client(a.token, 'A');
@@ -136,9 +154,13 @@ function client(token, name) {
   const groupId = group.chat.id;
   const groupMsg = await cb.wait('chat:new', 4000, (e) => e.payload.chatId === groupId).then(() => true, () => false);
   ok(groupMsg, 'второй участник уведомлён о группе');
-  ca.send('message:send', { chatId: groupId, text: '@bot привет!', clientId: 'c3' });
-  const botReply = await ca.wait('message:new', 6000, (e) => e.payload.chatId === groupId && e.payload.message.author && e.payload.message.author.isBot);
-  ok(!!botReply, 'бот отвечает в группе на @bot', (botReply.payload.message.text || '').slice(0, 60));
+  if (demoEnabled) {
+    ca.send('message:send', { chatId: groupId, text: '@bot привет!', clientId: 'c3' });
+    const botReply = await ca.wait('message:new', 6000, (e) => e.payload.chatId === groupId && e.payload.message.author && e.payload.message.author.isBot);
+    ok(!!botReply, 'бот отвечает в группе на @bot', (botReply.payload.message.text || '').slice(0, 60));
+  } else {
+    console.log('   ➖ бот не проверяется: в обычном режиме он не создаётся');
+  }
 
   const dm = await rest('/chats/direct', { method: 'POST', body: { userId: b.user.id }, token: a.token });
   ok(dm.chat.id === chatId, 'повторный личный чат не дублируется');
@@ -189,8 +211,9 @@ function client(token, name) {
   ok(unauth, 'без токена API закрыт');
   const empty = await rest(`/chats/${chatId}/messages`, { method: 'POST', body: { text: '   ' }, token: a.token }).then(() => false, (e) => e.status === 400);
   ok(empty, 'пустое сообщение отклонено');
-  const foreign = await rest(`/chats/${groupId}/messages`, { token: demo.token }).then(() => false, (e) => e.status === 404 || e.status === 403);
-  ok(foreign, 'чужой чат недоступен');
+  const C = await rest('/auth/register', { method: 'POST', body: { username: 'test_c_' + suffix, displayName: 'Тест Вера', password: 'pass1234' } });
+  const foreign = await rest(`/chats/${groupId}/messages`, { token: C.token }).then(() => false, (e) => e.status === 404 || e.status === 403);
+  ok(foreign, 'чужой чат недоступен постороннему пользователю');
   ca2.close();
 
   console.log('\n' + (process.exitCode ? '❌ Есть падения — см. выше' : '✅ Все проверки пройдены'));

@@ -34,21 +34,23 @@
 
     <form id="auth-form" autocomplete="on">
       <label class="field"><span>Логин</span>
-        <input id="auth-username" name="username" placeholder="anya" autocomplete="username" required>
+        <input id="auth-username" name="username" placeholder="например: ivan" autocomplete="username" required>
       </label>
       <label class="field" id="field-display" hidden><span>Как вас зовут</span>
         <input id="auth-display" name="displayName" placeholder="Аня Орлова">
       </label>
       <label class="field"><span>Пароль</span>
-        <input id="auth-password" name="password" type="password" placeholder="demo1234" autocomplete="current-password" required>
+        <input id="auth-password" name="password" type="password" placeholder="минимум 4 символа" autocomplete="current-password" required>
       </label>
       <button class="btn primary block" type="submit" id="auth-submit">Войти</button>
       <div class="auth-error" id="auth-error" hidden></div>
     </form>
 
-    <div class="auth-divider"><span>или</span></div>
-    <button class="btn ghost block" id="btn-demo">🚀 Демо-вход (без регистрации)</button>
-    <div class="demo-hint" id="demo-hint" hidden></div>
+    <div id="demo-block" hidden>
+      <div class="auth-divider"><span>или</span></div>
+      <button class="btn ghost block" id="btn-demo">🚀 Демо-вход (без регистрации)</button>
+      <div class="demo-hint" id="demo-hint" hidden></div>
+    </div>
     <p class="auth-foot">Сервер: <code id="server-url">—</code> · <span id="server-status">подключение…</span></p>
   </div>
 </div>
@@ -146,8 +148,6 @@
       </div>
 
       <div class="typing-line" id="typing-line"></div>
-
-      <div class="drop-hint" id="drop-hint">Отпустите файлы, чтобы отправить 📎</div>
 
       <footer class="composer">
         <div class="reply-preview" id="reply-preview" hidden>

@@ -22,16 +22,23 @@ jobs:
       - name: Зависимости сервера
         run: cd server && npm install --omit=dev --no-audit --no-fund
 
-      - name: Тесты сервера и клиента (75 проверок)
+      - name: Тесты — обычный режим (без демо-данных)
         run: |
           cd server
-          node server.js --port 4100 --data /tmp/kontur-ci --quiet &
-          for i in $(seq 1 20); do
-            curl -sf http://localhost:4100/health >/dev/null && break || sleep 1
-          done
           npm install --no-save jsdom --no-audit --no-fund
+          node server.js --port 4100 --data /tmp/kontur-clean --quiet &
+          for i in $(seq 1 20); do curl -sf http://localhost:4100/health >/dev/null && break || sleep 1; done
           node test/smoke.js http://localhost:4100
           node test/client-smoke.js http://localhost:4100
+          pkill -f "server.js --port 4100" || true
+
+      - name: Тесты — демо-режим (--demo)
+        run: |
+          cd server
+          node server.js --port 4200 --data /tmp/kontur-demo --demo --quiet &
+          for i in $(seq 1 20); do curl -sf http://localhost:4200/health >/dev/null && break || sleep 1; done
+          node test/smoke.js http://localhost:4200
+          node test/client-smoke.js http://localhost:4200
 
       - name: Сборка KonturServer.exe (Windows x64)
         run: BUILD_LINUX_TOO=0 bash scripts/make-windows-exe.sh

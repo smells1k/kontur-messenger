@@ -116,6 +116,7 @@
     pendingFiles: [],
     outbox: JSON.parse(localStorage.getItem('k.outbox') || '[]'),
     filter: 'all',
+    demoMode: false,        // включает сервер флагом --demo (демо-аккаунты и бот)
     usersCache: [],
     call: null,
     settings: Object.assign({ theme: 'dark', notifications: true, sounds: true, enterSends: true, previews: true },
@@ -1338,6 +1339,7 @@
     });
 
     $('#btn-demo').addEventListener('click', async () => {
+      if (!S.demoMode) { toast('Демо-режим выключен на сервере', 'err'); return; }
       try {
         const d = await api('/auth/demo', { method: 'POST', body: {} });
         const names = (d.demoAccounts || []).map((u) => u.displayName + ' (@' + u.username + ')').join(', ');
@@ -1379,7 +1381,7 @@
         { id: 'group', icon: '👥', label: 'Новая группа', run: () => openUsersPicker('group') },
         { id: 'theme', icon: '🌗', label: 'Сменить тему', run: () => { S.settings.theme = S.settings.theme === 'dark' ? 'light' : 'dark'; saveSettings(); applyTheme(); } },
         { id: 'settings', icon: '⚙️', label: 'Настройки', run: () => openSettings() },
-        { id: 'demo', icon: '🧪', label: 'Демо-данные и аккаунты', run: () => showDemoInfo() },
+        ...(S.demoMode ? [{ id: 'demo', icon: '🧪', label: 'Демо-данные и аккаунты', run: () => showDemoInfo() }] : []),
         { id: 'about', icon: 'ℹ️', label: 'О сборке (.exe / LAN)', run: () => showAbout() },
       ]);
     });
@@ -1734,8 +1736,14 @@
       const info = await api('/server/info');
       $('#server-url').textContent = location.host || 'localhost';
       $('#server-status').textContent = `сервер на связи · v${info.version}`;
-      $('#demo-hint').innerHTML = `Демо-аккаунты: <b>anya</b>, <b>boris</b>, <b>vera</b>, <b>gleb</b> · пароль <b>demo1234</b> · бот <b>@bot</b>`;
-      $('#demo-hint').hidden = false;
+      S.demoMode = !!info.demoMode;
+      const demoBlock = $('#demo-block');
+      if (demoBlock) demoBlock.hidden = !S.demoMode;
+      if (S.demoMode) {
+        $('#demo-hint').innerHTML = `Демо-аккаунты: <b>anya</b>, <b>boris</b>, <b>vera</b>, <b>gleb</b> · пароль <b>demo1234</b> · бот <b>@bot</b>`;
+        $('#demo-hint').hidden = false;
+      }
+      if (!S.demoMode && !S.token) $('#server-status').textContent = `сервер на связи · v${info.version} · регистрация открыта`;
     } catch {
       $('#server-status').textContent = 'сервер недоступен';
       $('#server-url').textContent = location.host || 'localhost';
@@ -1743,7 +1751,7 @@
     bindUI();
     window.addEventListener('beforeunload', () => { try { conn.ws && conn.ws.close(); } catch {} });
     if (S.token) boot();
-    if (location.hash === '#demo' && !S.token) $('#btn-demo').click();
+    if (location.hash === '#demo' && !S.token && S.demoMode) $('#btn-demo').click();
   }
 
   window.K = { S, api, toast, beep, avatarHTML, esc, markup, initials, shade, fmtTime, fmtDay, fmtBytes, fmtDuration, previewText, getChat, getList, renderChats, renderPanel, renderChatHeader, upsertChat, api_: api, uploadFile, openChat, renderMessages, scrollToBottom };
