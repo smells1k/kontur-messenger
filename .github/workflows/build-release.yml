@@ -54,6 +54,7 @@ jobs:
             release/KonturServer.exe
             release/README-KLIENT.txt
             release/reset-data.bat
+            release/connect-to-server.bat
             release/reset-data.js
           if-no-files-found: error
 
@@ -102,6 +103,7 @@ jobs:
             release/KonturServer.exe
             release/README-KLIENT.txt
             release/reset-data.bat
+            release/connect-to-server.bat
             release/reset-data.js
           draft: false
           allowUpdates: true
