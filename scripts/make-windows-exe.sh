@@ -84,7 +84,7 @@ rm -rf release/web; cp -r web release/web
 [ -f scripts/reset-data.bat ] && cp scripts/reset-data.bat release/reset-data.bat || true
 [ -f scripts/connect-to-server.bat ] && cp scripts/connect-to-server.bat release/connect-to-server.bat || true
 [ -f scripts/reset-data.js ] && cp scripts/reset-data.js release/reset-data.js || true
-[ -f "ОБНОВЛЕНИЕ-И-ОЧИСТКА.txt" ] && cp "ОБНОВЛЕНИЕ-И-ОЧИСТКА.txt" release/ || true
+[ -f "OBNOVLENIE-I-OCHISTKA.txt" ] && cp "OBNOVLENIE-I-OCHISTKA.txt" release/ || true
 
 echo ""
 echo "✅ Готово!"
