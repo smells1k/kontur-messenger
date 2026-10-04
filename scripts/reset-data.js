@@ -47,19 +47,19 @@ function remove(target, label) {
     ? fs.readdirSync(target).reduce((acc, f) => acc + (fs.tryStat = (() => { try { return fs.statSync(path.join(target, f)); } catch { return { size: 0 }; } })()).size, 0)
     : stat.size;
   if (DRY) {
-    console.log(`  • [пробный запуск] удалил бы ${label}: ${target}`);
+    console.log(`  * [пробный запуск] удалил бы ${label}: ${target}`);
   } else {
     fs.rmSync(target, { recursive: true, force: true });
-    console.log(`  ✓ удалено (${(size / 1024).toFixed(1)} КБ) — ${label}`);
+    console.log(`  ok удалено (${(size / 1024).toFixed(1)} КБ) - ${label}`);
   }
   return 1;
 }
 
-console.log(`\nСброс данных мессенджера «Контур»${DRY ? ' (пробный запуск, ничего не меняется)' : ''}`);
+console.log(`\nСброс данных мессенджера "Контур"${DRY ? ' (пробный запуск, ничего не меняется)' : ''}`);
 console.log(`Папка данных: ${DATA_DIR}\n`);
 
 if (!fs.existsSync(DATA_DIR)) {
-  console.log('ℹ Папка данных ещё не создана — сбрасывать нечего.');
+  console.log('[i] Папка данных ещё не создана - сбрасывать нечего.');
   process.exit(0);
 }
 

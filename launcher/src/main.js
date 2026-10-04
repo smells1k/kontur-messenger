@@ -71,6 +71,8 @@ if (has('help') || has('h')) {
                   Cloudflare Zero Trust (Networks → Tunnels), добавьте Public hostname
                   вида kontur.ваш-домен.ру → http://localhost:4000 и запустите так.
                   Адрес всегда один и тот же. Домен подключается к Cloudflare бесплатно.
+  --purge-demo    удалить из базы демо-аккаунты, бота и их чаты (ваши переписки остаются)
+  --fresh         один раз полностью стереть базу, файлы и настройки
   --closed        закрыть регистрацию (полезно вместе с --tunnel)
   --server URL    подключиться к ЧУЖОМУ серверу (свой сервер не запускается):
                   KonturServer.exe --server http://192.168.1.10:4000
@@ -148,7 +150,7 @@ function startServer() {
 
   const webDir = findWebDir() || extractWeb();
   if (!webDir) {
-    console.error('❌ Не найдена папка web с клиентом. Положи её рядом с .exe.');
+    console.error('[x] Не найдена папка web с клиентом. Положи её рядом с .exe.');
     process.exit(1);
   }
 
@@ -156,6 +158,8 @@ function startServer() {
     .concat(QUIET ? ['--quiet'] : [])
     .concat(USE_HTTPS ? ['--https'] : [])
     .concat(has('no-demo') ? ['--no-demo'] : [])
+    .concat(has('purge-demo') ? ['--purge-demo'] : [])
+    .concat(has('fresh') ? ['--fresh'] : [])
     .concat(has('closed') ? ['--closed'] : []);
   process.env.KONTUR_LAUNCHER = '1';
   if (process.env.KONTUR_DEBUG === '1') {
@@ -176,8 +180,11 @@ function startServer() {
 
 /* -------------------------------------------------------------------- клиент */
 const USE_HTTPS = has('https') || process.env.HTTPS === '1';
+/** Локальный адрес намеренно на 127.0.0.1: «localhost» на Windows резолвится в IPv6 ::1,
+ *  а сервер слушает IPv4 — из-за этого проверка «сервер не отвечает» и окно не открывалось. */
+const LOCAL_BASE = `${USE_HTTPS ? 'https' : 'http'}://127.0.0.1:${PORT}`;
 
-function healthCheck(url = `${USE_HTTPS ? 'https' : 'http'}://127.0.0.1:${PORT}/health`) {
+function healthCheck(url = `${LOCAL_BASE}/health`) {
   return new Promise((resolve) => {
     const lib = url.startsWith('https') ? require('https') : http;
     const req = lib.get(url, { timeout: 1500, rejectUnauthorized: false }, (res) => { res.resume(); resolve(res.statusCode === 200); });
@@ -230,7 +237,12 @@ function permissionsArgs(url) {
 
 async function openClient(url = null) {
   const target = url || `${USE_HTTPS ? 'https' : 'http'}://localhost:${PORT}`;
-  if (!(await waitForServer(target.replace(/\/$/, '') + '/health'))) { console.error('❌ Сервер не отвечает, окно не открываю.'); return; }
+  const checkUrl = url ? url.replace(/\/$/, '') + '/health' : `${LOCAL_BASE}/health`;
+  if (!(await waitForServer(checkUrl, 25000))) {
+    console.error(`[x] Сервер не отвечает по адресу ${checkUrl} - окно не открываю.`);
+    console.error('   Проверьте, не занят ли порт другой программой, и запустите ещё раз.');
+    return;
+  }
   const browser = APP_MODE ? findChromium() : null;
   if (browser) {
     // «приложение»: окно без адресной строки и вкладок
@@ -240,7 +252,7 @@ async function openClient(url = null) {
     if (!IS_WINDOWS && process.platform === 'linux') args.push('--class=Kontur');
     const child = spawn(browser, args, { detached: true, stdio: 'ignore' });
     child.unref();
-    if (IS_WINDOWS) console.log(`   Окно приложения открыто (${path.basename(browser)}). Работает как обычное приложение.`);
+    if (IS_WINDOWS) console.log(` Окно приложения открыто (${path.basename(browser)}). Работает как обычное приложение.`);
     if (permissionsArgs(target).length) {
       console.log('   Камера, микрофон и демонстрация экрана разрешены в этом окне даже по http.');
     }
@@ -249,7 +261,7 @@ async function openClient(url = null) {
   const cmd = IS_WINDOWS ? `start "" "${target}"` : process.platform === 'darwin' ? `open "${target}"` : `xdg-open "${target}"`;
   exec(cmd, () => {});
   if (!target.startsWith('https') && permissionsArgs(target).length) {
-    console.log('   ⚠️ Открываю в обычном браузере: камеру и микрофон он заблокирует (не-localhost по http).');
+    console.log('   [!] Открываю в обычном браузере: камеру и микрофон он заблокирует (не-localhost по http).');
     console.log('      Варианты: запустите без --browser (окно-приложение), либо на сервере включите --https.');
   }
 }
@@ -269,9 +281,9 @@ function startTunnel() {
   const named = !!TUNNEL_TOKEN;
   console.log('');
   console.log(named
-    ? '  🌍 Подключаю постоянный адрес (именной туннель Cloudflare)…'
-    : '  🌍 Открываю доступ из интернета (Cloudflare Tunnel)…');
-  console.log(`     адрес внутри: http://127.0.0.1:${PORT}`);
+    ? '  [i] Подключаю постоянный адрес (именной туннель Cloudflare)…'
+    : '  [i] Открываю доступ из интернета (Cloudflare Tunnel)…');
+  console.log(`   адрес внутри: http://127.0.0.1:${PORT}`);
 
   const args = named
     ? ['tunnel', '--no-autoupdate', 'run', '--token', TUNNEL_TOKEN]
@@ -291,13 +303,14 @@ function startTunnel() {
     const m = text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/i);
     if (m && !shown) {
       shown = true;
+      process.env.KONTUR_TUNNEL_URL = m[0];   // сервер отдаст её в /health — покажем в интерфейсе
       console.log('');
-      console.log('  ┌───────────────────────────────────────────────────────────────┐');
-      console.log('  │  ✅ Ссылка для друзей — работает из любой сети:               │');
-      console.log('  └───────────────────────────────────────────────────────────────┘');
-      console.log(`     ${m[0]}`);
+      console.log('  +' + '-'.repeat(61) + '+');
+      console.log('  |  ССЫЛКА ДЛЯ ДРУЗЕЙ - работает из любой сети:' + ' '.repeat(16) + '|');
+      console.log('  +' + '-'.repeat(61) + '+');
+      console.log(`   ${m[0]}`);
       console.log('     Камера, микрофон и демонстрация экрана там разрешены (это HTTPS).');
-      console.log('     ⚠️ Кто знает ссылку — может зарегистрироваться. Только для своих:');
+      console.log('     [!] Кто знает ссылку - может зарегистрироваться. Только для своих:');
       console.log('        создайте аккаунты и перезапустите с флагом --closed.');
       console.log('');
     }
@@ -306,26 +319,26 @@ function startTunnel() {
   child.stderr.on('data', onData);
   if (named) {
     console.log('');
-    console.log('  ┌───────────────────────────────────────────────────────────────┐');
-    console.log('  │  ✅ Постоянный адрес — тот, что вы задали в Cloudflare:       │');
-    console.log('  │     например https://kontur.ваш-домен.ру                      │');
-    console.log('  └───────────────────────────────────────────────────────────────┘');
+    console.log('  +' + '-'.repeat(61) + '+');
+    console.log('  |  ПОСТОЯННЫЙ АДРЕС - тот, что вы задали в Cloudflare:' + ' '.repeat(10) + '|');
+    console.log('  |  например https://kontur.ваш-домен.ру' + ' '.repeat(23) + '|');
+    console.log('  +' + '-' .repeat(61) + '+');
     console.log('     Он не меняется при перезапуске сервера. Камера, микрофон и');
-    console.log('     демонстрация экрана там работают — это HTTPS.');
-    console.log('     Если адрес не открывается — проверьте в панели Cloudflare:');
-    console.log('     Networks → Tunnels → Public hostname ведёт на http://localhost:' + PORT);
+    console.log('     демонстрация экрана там работают - это HTTPS.');
+    console.log('     Если адрес не открывается - проверьте в панели Cloudflare:');
+    console.log('     Networks -> Tunnels -> Public hostname ведёт на http://localhost:' + PORT);
     console.log('');
   }
   child.on('error', (err) => printTunnelHelp(err.message));
-  child.on('exit', (code) => { if (code && code !== 0) console.log(`  ⚠️ Туннель закрылся (код ${code}). Ссылка перестала работать.`); });
+  child.on('exit', (code) => { if (code && code !== 0) console.log(`[!] Туннель закрылся (код ${code}). Ссылка перестала работать.`); });
   process.on('exit', () => { try { child.kill(); } catch { /* уже закрыт */ } });
   return child;
 }
 
 function printTunnelHelp(reason) {
-  console.log('  ❌ Не удалось запустить cloudflared' + (reason ? ` (${reason})` : '') + '.');
+  console.log('  [x] Не удалось запустить cloudflared' + (reason ? ` (${reason})` : '') + '.');
   console.log('     Он не входит в состав мессенджера. Скачайте один файл:');
-  console.log('     https://github.com/cloudflare/cloudflared/releases/latest  →  cloudflared-windows-amd64.exe');
+  console.log('     https://github.com/cloudflare/cloudflared/releases/latest  ->  cloudflared-windows-amd64.exe');
   console.log('     Переименуйте в cloudflared.exe, положите рядом с KonturServer.exe и запустите снова.');
   console.log('     Или вручную в другом окне:  cloudflared tunnel --url http://localhost:' + PORT);
 }
@@ -336,18 +349,18 @@ function printTunnelHelp(reason) {
   if (SERVER_URL) {
     if (!QUIET) {
       console.log('');
-      console.log('  💬  Мессенджер «Контур» — подключаюсь к серверу друга');
-      console.log(`      Адрес: ${SERVER_URL}`);
-      console.log('      Свой сервер не запускается — вы в общей сети с другом.');
+      console.log('    Мессенджер "Контур" - подключаюсь к серверу друга');
+      console.log(`    Адрес: ${SERVER_URL}`);
+      console.log('      Свой сервер не запускается - вы в общей сети с другом.');
       console.log('');
     }
     const up = await healthCheck(SERVER_URL + '/health');
     if (!up && !QUIET) {
-      console.log('   ⚠️ Сервер пока не отвечает. Проверьте:');
-      console.log('      • адрес указан верно (например, http://192.168.1.10:4000);');
-      console.log('      • вы в одной сети с тем, кто запустил сервер;');
-      console.log('      • на его компьютере разрешён мессенджер в брандмауэре.');
-      console.log('   Всё равно открываю окно — клиент сам переподключится.');
+      console.log('   [!] Сервер пока не отвечает. Проверьте:');
+      console.log('      * адрес указан верно (например, http://192.168.1.10:4000);');
+      console.log('      * вы в одной сети с тем, кто запустил сервер;');
+      console.log('      * на его компьютере разрешён мессенджер в брандмауэре.');
+      console.log('   Всё равно открываю окно - клиент сам переподключится.');
     }
     if (OPEN_APP) await openClient(SERVER_URL);
     return;
@@ -355,7 +368,7 @@ function printTunnelHelp(reason) {
 
   const already = await healthCheck();
   if (already) {
-    if (!QUIET) console.log(`\n[launcher] Сервер уже запущен на порту ${PORT} — открываю клиент.`);
+    if (!QUIET) console.log(`\n[launcher] Сервер уже запущен на порту ${PORT} - открываю клиент.`);
     if (OPEN_APP) await openClient();
     if (USE_TUNNEL) startTunnel();
     return;
@@ -366,7 +379,7 @@ function printTunnelHelp(reason) {
   // лёгкая подстраховка: даём серверу подняться и, если он упал — выходим с кодом 1
   process.on('uncaughtException', (err) => {
     if (err && err.code === 'EADDRINUSE') {
-      console.log(`\n[launcher] Порт ${PORT} занят — возможно, мессенджер уже запущен. Открываю клиент.`);
+      console.log(`\n[launcher] Порт ${PORT} занят - возможно, мессенджер уже запущен. Открываю клиент.`);
       if (OPEN_APP) openClient();
       return;
     }
@@ -377,7 +390,7 @@ function printTunnelHelp(reason) {
     setTimeout(async () => {
       const up = await waitForServer();
       if (up) await openClient();
-      else console.error('❌ Сервер не отвечает.');
+      else console.error('[x] Сервер не отвечает.');
     }, 300);
   }
 

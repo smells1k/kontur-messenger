@@ -15,6 +15,7 @@ const { Core } = require('./src/core');
 const { Hub } = require('./src/realtime');
 const { createApi } = require('./src/api');
 const { seedDemo } = require('./src/seed');
+const { checkUpdate } = require('./src/update');
 const { AssistantBot } = require('./src/bots');
 
 /* ------------------------------------------------------------------ аргументы */
@@ -31,6 +32,23 @@ function flag(name, def) {
 
 const ROOT = path.resolve(__dirname, '..');
 
+/**
+ * Где хранить базу и файлы.
+ * В упакованном .exe каталог кода лежит внутри образа (только для чтения), поэтому
+ * на Windows берём %LOCALAPPDATA%\Kontur\data — ровно туда же пишет лаунчер Kontur.exe.
+ * Благодаря этому и одиночный KonturServer.exe, и лаунчер видят одну и ту же базу.
+ */
+function defaultDataDir() {
+  if (process.pkg) {
+    if (process.platform === 'win32' || process.env.LOCALAPPDATA) {
+      const local = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+      return path.join(local, 'Kontur', 'data');
+    }
+    return path.join(path.dirname(process.execPath), 'data');
+  }
+  return path.join(ROOT, 'data');
+}
+
 // Демо-режим (демо-аккаунты, бот, готовые чаты) по умолчанию ВЫКЛЮЧЕН.
 // Включить для показа:  node server.js --demo   (или DEMO=1)
 const DEMO_MODE = (argv.includes('--demo') || process.env.DEMO === '1') && !argv.includes('--no-demo');
@@ -43,7 +61,7 @@ const config = {
   serverName: String(flag('name', process.env.SERVER_NAME || 'Мессенджер «Контур»')),
   port: Number(flag('port', process.env.PORT || 4000)),
   host: String(flag('host', process.env.HOST || '0.0.0.0')),
-  dataDir: path.resolve(String(flag('data', process.env.DATA_DIR || path.join(ROOT, 'data')))),
+  dataDir: path.resolve(String(flag('data', process.env.DATA_DIR || defaultDataDir()))),
   webDir: path.resolve(String(flag('web', process.env.WEB_DIR || path.join(ROOT, 'web')))),
   demoMode: DEMO_MODE,
   autoSeed: DEMO_MODE && !argv.includes('--no-seed'),
@@ -68,12 +86,12 @@ if (argv.includes('--fresh') && !argv.includes('--no-fresh')) {
       removed.push(entry);
     }
   } catch (err) {
-    console.error('⚠️  Не удалось очистить папку данных:', err.message);
+    console.error('[!]  Не удалось очистить папку данных:', err.message);
   }
   console.log('');
-  console.log('  🧹 Зачистка базы (флаг --fresh)');
-  console.log('     Папка:      ' + config.dataDir);
-  console.log('     Удалено:    ' + (removed.length ? removed.join(', ') : 'нечего удалять — было пусто'));
+  console.log('   Зачистка базы (флаг --fresh)');
+  console.log('     Папка: ' + config.dataDir);
+  console.log('     Удалено: ' + (removed.length ? removed.join(', ') : 'нечего удалять - было пусто'));
   console.log('     Сервер стартует с нуля: пользователей, чатов и файлов нет.');
   console.log('     Дальше запускай без --fresh, иначе база будет стираться каждый раз.');
   console.log('');
@@ -101,12 +119,32 @@ app.use(express.json({ limit: '2mb' }));
 
 /* ------------------------------------------------------- HTTPS (для звонков) */
 
+/** Адаптеры, по которым друзья точно не зайдут: виртуальные коммутаторы и служебные интерфейсы. */
+const VIRTUAL_RE = /virtual|vmware|hyper-?v|vethernet|docker|wsl|loopback|tailscale|zerotier|radmin|hamachi|npcap|openvpn|tap-|bluetooth|isatap|teredo/i;
+
+/**
+ * Все локальные IPv4 с именами адаптеров. Виртуальные помечаются и уходят в конец:
+ * на Windows рядом с Wi-Fi часто есть Hyper-V/VMware-адаптеры со своими 192.168.x.1,
+ * и именно их нельзя давать друзьям.
+ */
 function localIPv4() {
   const out = [];
-  for (const list of Object.values(os.networkInterfaces())) {
-    for (const iface of list || []) if (iface.family === 'IPv4' && !iface.internal) out.push(iface.address);
+  for (const [name, list] of Object.entries(os.networkInterfaces())) {
+    for (const iface of list || []) {
+      if (iface.family !== 'IPv4' || iface.internal) continue;
+      const virtual = VIRTUAL_RE.test(name) || /^169\.254\./.test(iface.address);
+      out.push({ name, address: iface.address, virtual });
+    }
   }
+  out.sort((a, b) => Number(a.virtual) - Number(b.virtual));
   return out;
+}
+
+/** Только те адреса, которые стоит давать друзьям (без виртуальных). */
+function publicIPv4(list) {
+  const all = list || localIPv4();
+  const real = all.filter((a) => !a.virtual);
+  return real.length ? real : all;
 }
 
 /**
@@ -133,7 +171,7 @@ function ensureCerts(cfg) {
     );
     return { key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath), keyPath, certPath };
   } catch (err) {
-    console.warn('⚠️  HTTPS: не удалось создать сертификат (openssl):', err.message);
+    console.warn('[!]  HTTPS: не удалось создать сертификат (openssl):', err.message);
     return null;
   }
 }
@@ -141,12 +179,71 @@ function ensureCerts(cfg) {
 const wantHttps = argv.includes('--https') || process.env.HTTPS === '1';
 const tls = wantHttps ? ensureCerts(config) : null;
 config.https = !!tls;
-if (wantHttps && !tls) console.warn('⚠️  Продолжаю по http — звонки с других устройств браузер может заблокировать.');
+if (wantHttps && !tls) console.warn('[!]  Продолжаю по http - звонки с других устройств браузер может заблокировать.');
 
 const server = tls ? require('https').createServer(tls, app) : http.createServer(app);
 const hub = new Hub({ server, store, core, secret, path: '/ws' });
 core.hub = hub;
 core.hubStore = store;
+
+/**
+ * Полное удаление демо-данных из существующей базы (флаг --purge-demo):
+ * демо-аккаунты, бот @bot, их чаты, группы и сообщения. Ваши переписки остаются.
+ */
+function purgeDemoData() {
+  const DEMO_LOGINS = new Set(['anya', 'boris', 'vera', 'gleb', 'bot']);
+  const demoIds = new Set();
+  for (const [id, u] of Object.entries(store.data.users || {})) {
+    if (!u) continue;
+    if (u.isBot || DEMO_LOGINS.has(String(u.username))) demoIds.add(id);
+  }
+  const removed = { users: demoIds.size, chats: 0, messages: 0 };
+  if (!demoIds.size) return removed;
+
+  for (const id of demoIds) delete store.data.users[id];
+
+  for (const [chatId, chat] of Object.entries(store.data.chats || {})) {
+    if (!chat) continue;
+    const left = (chat.members || []).filter((id) => !demoIds.has(id));
+    const hadDemo = left.length !== (chat.members || []).length;
+    if (!hadDemo) continue;
+    // личный чат с демо-аккаунтом или группа, в которой не осталось людей — удаляем целиком
+    if (!left.length || (chat.type === 'direct' && !chat.isDemo)) {
+      for (const mid of store.data.chatMessages[chatId] || []) delete store.data.messages[mid];
+      delete store.data.chatMessages[chatId];
+      delete store.data.chats[chatId];
+      removed.chats++;
+      continue;
+    }
+    chat.members = left;
+  }
+
+  // сообщения демо-аккаунтов в оставшихся чатах тоже убираем
+  for (const [mid, m] of Object.entries(store.data.messages || {})) {
+    if (m && demoIds.has(m.authorId)) {
+      delete store.data.messages[mid];
+      const list = store.data.chatMessages[m.chatId];
+      if (list) store.data.chatMessages[m.chatId] = list.filter((x) => x !== mid);
+      removed.messages++;
+    }
+  }
+  for (const key of Object.keys(store.data.reads || {})) {
+    if (demoIds.has(key.split(':')[1])) delete store.data.reads[key];
+  }
+  store.data.calls = {};
+  store.data.events = (store.data.events || []).filter((e) => !e || !demoIds.has(e.actorId));
+  store.save();
+  return removed;
+}
+
+if (argv.includes('--purge-demo')) {
+  const clean = store.data.users ? purgeDemoData() : { users: 0, chats: 0, messages: 0 };
+  console.log('');
+  console.log('   Очистка демо-данных (флаг --purge-demo)');
+  console.log(`     Удалено: демо-аккаунтов - ${clean.users}, чатов - ${clean.chats}, сообщений - ${clean.messages}`);
+  console.log('     Ваши аккаунты, чаты и история не тронуты. Дальше запускайте без этого флага.');
+  console.log('');
+}
 
 const seeded = config.autoSeed ? seedDemo({ store, core, uploadDir: config.uploadDir }) : { skipped: true };
 
@@ -166,8 +263,13 @@ if (botUser) {
 
 app.use('/api', createApi({ core, store, secret, config }));
 
+// Проверка обновлений: клиент спрашивает и, если вышла новая версия, показывает ссылку.
+app.get('/api/server/update', (req, res) => checkUpdate(config.version).then((u) => res.json(u)).catch(() => res.json({ current: config.version, hasUpdate: false, unknown: true })));
+
 app.get('/health', (req, res) => res.json({
   ok: true,
+  lan: publicIPv4().map((a) => ({ address: a.address, name: a.name, virtual: a.virtual })),
+  tunnel: process.env.KONTUR_TUNNEL_URL || null,
   name: config.serverName,
   version: config.version,
   build: config.buildDate || '',
@@ -176,6 +278,7 @@ app.get('/health', (req, res) => res.json({
   chats: Object.keys(store.data.chats || {}).length,
   seq: store.seq,
   demoMode: config.demoMode,
+  data: config.dataDir,
 }));
 
 /* --------------------------------------------------------------- статика веб */
@@ -209,36 +312,44 @@ server.listen(config.port, config.host, () => {
     const scheme = config.https ? 'https' : 'http';
     const wsScheme = config.https ? 'wss' : 'ws';
     console.log('');
-    console.log('  ┌─────────────────────────────────────────────────────┐');
-    console.log('  │  💬  ' + config.serverName.padEnd(44) + ' │');
-    console.log('  └─────────────────────────────────────────────────────┘');
-    console.log(`   Версия:      ${config.version}${config.buildDate ? ' (сборка ' + config.buildDate + ')' : ''}  ·  Node ${process.version}`);
-    console.log(`   Локально:    ${scheme}://localhost:${config.port}`);
-    for (const ip of addresses) console.log(`   В сети:      ${scheme}://${ip}:${config.port}   ← открой у друзей в той же сети`);
-    if (addresses.length) console.log('      (если друзья в той же сети не заходят — разрешите мессенджер в брандмауэре Windows для частных сетей)');
-    console.log(`   WebSocket:   ${wsScheme}://localhost:${config.port}/ws`);
+    console.log('  +' + '-'.repeat(53) + '+');
+    console.log('  | ' + String(config.serverName).replace(/[«»]/g, '').trim().padEnd(50).slice(0, 50) + '|');
+    console.log('  +' + '-'.repeat(53) + '+');
+    console.log(` Версия:      ${config.version}${config.buildDate ? ' (сборка ' + config.buildDate + ')' : ''}  -  Node ${process.version}`);
+    console.log(` Локально:    ${scheme}://localhost:${config.port}`);
+    const real = publicIPv4(addresses);
+    for (const a of real) {
+      console.log(` В сети:      ${scheme}://${a.address}:${config.port}   <- ${a.name} - этот адрес давайте друзьям`);
+    }
+    const virtualOnes = addresses.filter((a) => a.virtual);
+    if (virtualOnes.length) {
+      console.log(` (виртуальные адаптеры, друзьям не подходят: ${virtualOnes.map((a) => a.address).join(', ')})`);
+    }
+    if (addresses.length) console.log('      (если друзья в той же сети не заходят - разрешите мессенджер в брандмауэре Windows для частных сетей)');
+    console.log(` WebSocket:   ${wsScheme}://localhost:${config.port}/ws`);
     if (config.https) {
-      console.log('   🔒 HTTPS включён: сертификат самоподписанный → браузер один раз спросит');
-      console.log('      «Подробнее → Перейти на сайт». Зато камера, микрофон и звонки');
+      console.log('   [https] HTTPS включён: сертификат самоподписанный -> браузер один раз спросит');
+      console.log(' "Подробнее -> Перейти на сайт". Зато камера, микрофон и звонки');
       console.log('      работают на всех устройствах в сети.');
     } else {
-      console.log('   ℹ️  Голос/видео из браузера доступны только на этом компьютере (localhost).');
+      console.log('   [i]  Голос/видео из браузера доступны только на этом компьютере (localhost).');
       console.log('      Чтобы звонить с телефона/другого ПК, запусти с флагом --https.');
     }
-    console.log('   Из интернета: KonturServer.exe --tunnel   ← даст ссылку https://… ,');
+    console.log('   Из интернета: KonturServer.exe --tunnel   <- даст ссылку https://... ,');
     console.log('      она работает из любой сети, и камера с микрофоном там разрешены.');
     console.log('      Из исходников: cloudflared tunnel --url http://localhost:' + config.port);
-    console.log(`   Данные:      ${config.dataDir}`);
-    console.log('   Очистить всё: запусти один раз с флагом --fresh — база, файлы и');
+    console.log(` Данные:      ${config.dataDir}`);
+    console.log(` Зачистка:    удалите эту папку или запустите с флагом --fresh (один раз, без повтора регистрации)`);
+    console.log('   Очистить всё: запусти один раз с флагом --fresh - база, файлы и');
     console.log('      настройки удалятся, сервер начнёт с чистого листа.');
     if (seeded && !seeded.skipped) {
       console.log('');
-      console.log('   🧪 Демо-режим: аккаунты anya, boris, vera, gleb (пароль demo1234) · бот @bot');
-      console.log('      Или нажми «Демо-вход» прямо на странице входа.');
-      console.log('      Обычный режим без демо — запусти без флага --demo.');
+      console.log('   [демо] Демо-режим: аккаунты anya, boris, vera, gleb (пароль demo1234) - бот @bot');
+      console.log('      Или нажми "Демо-вход" прямо на странице входа.');
+      console.log('      Обычный режим без демо - запусти без флага --demo.');
     } else {
       console.log('');
-      console.log('   👤 База пустая: на странице входа нажми «Регистрация» —');
+      console.log('    База пустая: на странице входа нажми "Регистрация" -');
       console.log('      аккаунт создаётся за 5 секунд. Демо-чатов и ботов нет.');
     }
     console.log('');
@@ -252,7 +363,7 @@ server.listen(config.port, config.host, () => {
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    console.error(`\n❌ Порт ${config.port} занят. Запусти с другим портом:  node server.js --port ${config.port + 1}\n`);
+    console.error(`\n[x] Порт ${config.port} занят. Запусти с другим портом:  node server.js --port ${config.port + 1}\n`);
     process.exit(1);
   }
   throw err;
@@ -262,7 +373,7 @@ let closing = false;
 function shutdown() {
   if (closing) return;
   closing = true;
-  console.log('\n[server] останавливаюсь, сохраняю данные…');
+  console.log('\n[server] останавливаюсь, сохраняю данные...');
   bot?.pending?.clear?.();
   store.flush();
   for (const [, st] of hub.sockets) { try { st.userId && hub.sendToUser(st.userId, { type: 'server:shutdown' }); } catch {} }

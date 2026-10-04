@@ -221,6 +221,27 @@ function client(token, name) {
   const m = bInf.match(/version:\s*'([^']+)'/);
   ok(!!m && m[1] === health.version, 'версия клиента совпадает с версией сервера (нет рассинхрона сборок)', m ? 'v' + m[1] : 'файл build-info.js не найден');
 
+  console.log('\n— История чатов (GET /api/history) —');
+  const hist = await rest('/history?limit=50', { token: a.token });
+  ok(Array.isArray(hist.messages) && hist.messages.length > 0, 'история отдаёт сообщения из личных чатов и групп', `найдено: ${hist.total}`);
+  ok(hist.messages.every((r) => r.chatId && r.chatTitle && r.message && r.message.id), 'в каждой записи есть чат, заголовок и само сообщение');
+  const first = hist.messages[0].message;
+  ok(first.createdAt >= hist.messages[hist.messages.length - 1].message.createdAt, 'история идёт от свежих к старым');
+  const needle = 'иголка' + suffix;
+  await rest(`/chats/${chatId}/messages`, { method: 'POST', body: { text: needle }, token: a.token });
+  const found = await rest('/history?q=' + encodeURIComponent(needle), { token: a.token });
+  ok(found.total === 1 && found.messages[0].message.text === needle, 'поиск по всей истории находит нужное сообщение', `совпадений: ${found.total}`);
+  const inGroup = await rest('/history?chatId=' + groupId, { token: a.token });
+  ok(inGroup.messages.every((r) => r.chatId === groupId), 'фильтр «только этот чат» работает');
+  const perPage = await rest('/history?limit=2', { token: a.token });
+  ok(perPage.messages.length === 2 && perPage.hasMore === true, 'история листается порциями (limit/offset)');
+  const offsetPage = await rest('/history?limit=2&offset=2', { token: a.token });
+  ok(offsetPage.messages[0] && offsetPage.messages[0].message.id !== perPage.messages[0].message.id, 'следующая порция не повторяет предыдущую');
+  const foreignHist = await rest('/history?q=' + encodeURIComponent(needle), { token: b.token });
+  ok(foreignHist.total === 1, 'второй участник видит те же сообщения в своей истории');
+  const outsider = await rest('/history', { token: a.token });
+  ok(outsider.messages.every((r) => r.message.authorId !== undefined), 'история не отдаёт служебные записи без автора');
+
   console.log('\n— Обработка ошибок —');
   const unauth = await rest('/chats').then(() => false, (e) => e.status === 401);
   ok(unauth, 'без токена API закрыт');

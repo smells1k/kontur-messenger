@@ -120,7 +120,7 @@
     if (problem) { toast(problem, 'err', 9000); return; }
     if (C.active) { toast('Вы уже разговариваете — сначала завершите текущий звонок'); show(); return; }
     ws({ type: 'call:invite', payload: { chatId, kind } });
-    toast(kind === 'audio' ? '📞 Создаю аудиозвонок…' : '🎥 Создаю видеозвонок…');
+    toast(kind === 'audio' ? 'Создаю аудиозвонок…' : 'Создаю видеозвонок…');
   }
 
   function showIncoming(payload) {
@@ -210,8 +210,12 @@
     };
     C.peers.set(userId, entry);
 
-    if (C.localStream) for (const track of C.localStream.getTracks()) pc.addTrack(track, C.localStream);
-    if (C.effect !== 'none' && entry.camTrack) { /* обработка включается позже */ }
+    if (C.localStream) {
+      for (const track of C.localStream.getTracks()) {
+        const sender = pc.addTrack(track, C.localStream);
+        tuneSender(sender, track.kind === 'audio' ? 'audio' : 'camera');
+      }
+    }
 
     pc.onicecandidate = ({ candidate }) => {
       if (candidate) ws({ type: 'call:signal', payload: { callId: C.call.id, to: userId, data: { candidate } } });
@@ -252,34 +256,6 @@
     pc.onnegotiationneeded = negotiate;
     entry.negotiate = negotiate;
 
-    pc.ontrack = ({ track, streams }) => {
-      entry.stream = streams[0] || new MediaStream([track]);
-      attachRemote(userId, entry.stream);
-    };
-
-    pc.onnegotiationneeded = async () => {
-      if (!C.call || entry.makingOffer) return;
-      // канал занят другим обменом описаниями — подождём и попробуем снова
-      if (pc.signalingState !== 'stable') {
-        entry.negRetries = (entry.negRetries || 0) + 1;
-        if (entry.negRetries > 20) return;
-        clearTimeout(entry.negTimer);
-        entry.negTimer = setTimeout(() => pc.onnegotiationneeded(), 250);
-        return;
-      }
-      entry.negRetries = 0;
-      try {
-        entry.makingOffer = true;
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);      // явный offer — совместимо со всеми браузерами
-        ws({ type: 'call:signal', payload: { callId: C.call.id, to: userId, data: { description: pc.localDescription } } });
-      } catch (err) {
-        console.warn('[call] negotiation', err);
-      } finally {
-        entry.makingOffer = false;
-      }
-    };
-
     pc.oniceconnectionstatechange = () => {
       const st = pc.iceConnectionState;
       if (st === 'failed') restartIce(userId);
@@ -287,7 +263,16 @@
     };
     pc.onconnectionstatechange = () => {
       const st = pc.connectionState;
-      if (st === 'failed' && !entry.restarting) restartIce(userId);
+      if ((st === 'failed' || st === 'disconnected') && !entry.restarting) {
+        // «disconnected» бывает временным (сменилась сеть/подвис ноутбук) — даём 2 секунды и лечим
+        clearTimeout(entry.dropTimer);
+        entry.dropTimer = setTimeout(() => {
+          const now = entry.pc.connectionState;
+          if (now === 'failed' || now === 'disconnected') restartIce(userId);
+        }, 2000);
+      } else if (st === 'connected') {
+        clearTimeout(entry.dropTimer);
+      }
       renderSubtitle();
     };
 
@@ -300,8 +285,13 @@
     entry.restarting = true;
     try {
       if (typeof entry.pc.restartIce === 'function') entry.pc.restartIce();
-      await entry.pc.setLocalDescription(await entry.pc.createOffer({ iceRestart: true }));
-      ws({ type: 'call:signal', payload: { callId: C.call.id, to: userId, data: { description: entry.pc.localDescription } } });
+      await enqueue(entry, async () => {
+        if (entry.closed || entry.pc.signalingState !== 'stable') return;
+        const offer = await entry.pc.createOffer({ iceRestart: true });
+        if (entry.pc.signalingState !== 'stable') return;
+        await entry.pc.setLocalDescription(offer);
+        ws({ type: 'call:signal', payload: { callId: C.call.id, to: userId, data: { description: entry.pc.localDescription } } });
+      });
       toast('Переподключаю ' + (userOf(userId).displayName || 'участника') + '…');
     } catch (err) {
       console.warn('[call] ice restart', err);
@@ -368,6 +358,72 @@
       if (entry.closed || entry.pc.signalingState === 'closed') return;
       await entry.pc.addIceCandidate(candidate);
     });
+  }
+
+  /* ------------------------------------------------------------------ значки */
+
+  // Иконки рисуем сами (SVG): эмодзи в системной консоли и части браузеров Windows
+  // показываются квадратами, поэтому в интерфейсе их нет.
+  const ICON = (body, color) => `<svg viewBox="0 0 24 24" width="13" height="13" fill="${color}" aria-hidden="true">${body}</svg>`;
+  const SVG = {
+    micOff: ICON('<path d="M3 3l18 18h-2.6l-3.1-3.1A4 4 0 0 1 12 19a4 4 0 0 1-4-4v-4.2L3 5.4V3zm6 0a3 3 0 0 1 3 3v1.2l-3-3V3zm7 6.1 4 4V11h1v5.9l-5-5V9.1z" />', '#ff8080'),
+    screen: ICON('<path d="M3 4h18a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-7v2h3v2H7v-2h3v-2H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zm1 2v9h16V6H4z" />', '#7fd1ff'),
+    ok: ICON('<rect x="4" y="4" width="16" height="16" rx="3" />', '#37d67a'),
+    warn: ICON('<rect x="4" y="4" width="16" height="16" rx="3" />', '#f5c451'),
+    bad: ICON('<rect x="4" y="4" width="16" height="16" rx="3" />', '#ff6b6b'),
+  };
+
+  /**
+   * Мини-проверка своего соединения: поднимаем локальное peer-соединение с самим собой.
+   * Если ICE собрал свои адреса — сеть на нашей стороне в порядке (зелёный квадрат у своей плитки),
+   * если нет — показываем, что связь ещё проверяется. Собеседника это никак не касается.
+   */
+  function startSelfProbe() {
+    stopSelfProbe();
+    try {
+      const pc = new RTCPeerConnection({ iceServers: iceServers(), iceCandidatePoolSize: 4 });
+      C.self = pc;
+      C.selfCands = new Set();
+      C.selfState = 'checking';
+      pc.onicecandidate = ({ candidate }) => {
+        if (!candidate || !candidate.candidate) return;
+        if (C.selfCands.has(candidate.candidate)) return;
+        C.selfCands.add(candidate.candidate);
+        try { pc.addIceCandidate(candidate).catch(() => {}); } catch {}
+        scheduleTiles();
+      };
+      pc.onconnectionstatechange = () => {
+        C.selfState = pc.connectionState === 'connected' ? 'ok'
+          : pc.connectionState === 'failed' ? 'bad' : 'checking';
+        scheduleTiles();
+      };
+      if (C.localStream) for (const t of C.localStream.getTracks()) pc.addTrack(t, C.localStream);
+      // Даже без своей камеры и микрофона проверяем, что сеть доходит до сервера
+      const hasVideo = !!(C.localStream && C.localStream.getVideoTracks().length);
+      if (!hasVideo) try { pc.addTransceiver('video', { direction: 'recvonly' }); } catch {}
+      if (!C.localStream || !C.localStream.getAudioTracks().length) try { pc.addTransceiver('audio', { direction: 'recvonly' }); } catch {}
+      pc.createOffer().then((offer) => pc.setLocalDescription(offer)).catch(() => {});
+    } catch (err) {
+      console.warn('[call] self-check', err && err.message || err);
+      C.self = null;
+    }
+  }
+
+  function stopSelfProbe() {
+    if (C.self) { try { C.self.close(); } catch {} }
+    C.self = null;
+    C.selfCands = null;
+  }
+
+  /** Самопроверка пройдена? (успели собрать хотя бы один свой адрес) */
+  function selfOk() {
+    return !!(C.self && C.selfCands && C.selfCands.size > 0) && C.selfState !== 'bad';
+  }
+
+  /** Перерисовку плиток сглаживаем: событий ICE бывает много подряд. */
+  function scheduleTiles() {
+    if (C.tilesTimer) return;
+    C.tilesTimer = setTimeout(() => { C.tilesTimer = 0; renderTiles(); }, 200);
   }
 
   /* ------------------------------------------------------------------ плитки */
@@ -471,12 +527,26 @@
       videoEl.style.display = showVideo ? 'block' : 'none';
       tile.querySelector('.tile-fallback').style.display = showVideo ? 'none' : 'grid';
       const flags = tile.querySelector('.tile-flags');
-      if (flags) flags.textContent = (p.muted ? ' 🔇' : '') + (p.screen ? ' 🖥' : '');
+      if (flags) {
+        const badges = [];
+        if (p.muted) badges.push(`<span class="flag" title="микрофон выключен">${SVG.micOff}</span>`);
+        if (p.screen) badges.push(`<span class="flag" title="демонстрация экрана">${SVG.screen}</span>`);
+        const mineOk = isLocal ? selfOk() : connected;
+        const mark = isLocal
+          ? (selfOk() ? SVG.ok : (C.selfState === 'bad' ? SVG.bad : SVG.warn))
+          : (entry && entry.pc.connectionState === 'failed' ? SVG.bad : (connected ? SVG.ok : SVG.warn));
+        badges.push(`<span class="flag" title="${isLocal ? 'ваша связь' : 'связь с участником'}: ${mineOk ? 'в порядке' : 'проверяется'}">${mark}</span>`);
+        flags.innerHTML = badges.join('');
+      }
       tile.classList.toggle('screen', !!p.screen);
       const badge = tile.querySelector('.tile-badge');
       badge.hidden = !p.screen;
       const state = tile.querySelector('.tile-state');
       const connected = isLocal ? true : !!(entry && entry.pc.connectionState === 'connected');
+      if (isLocal && state) {
+        if (selfOk()) state.hidden = true;
+        else { state.hidden = false; state.textContent = C.selfState === 'bad' ? 'нет связи с сетью' : 'проверяю связь…'; }
+      }
       if (!isLocal && state) {
         if (!entry) { state.hidden = false; state.textContent = 'звоним…'; }
         else if (!connected && entry.pc.connectionState !== 'connected') {
@@ -506,8 +576,9 @@
     const bad = [...C.peers.values()].some((e) => ['failed', 'disconnected'].includes(e.pc.connectionState));
     const parts = [`${fmtDur(secs)}`, `участников: ${C.call.participants.length}`];
     if (C.peers.size) parts.push(`на связи: ${connected}/${C.peers.size}`);
-    if (bad) parts.push('⚠️ нестабильное соединение');
-    if (C.sharing) parts.push('🖥 ваш экран в эфире');
+    if (bad) parts.push('нестабильное соединение');
+    if (C.sharing) parts.push('ваш экран в эфире');
+    if (C.selfState === 'bad') parts.push('проверьте интернет');
     $('#call-sub').textContent = parts.join(' · ');
   }
 
@@ -621,6 +692,7 @@
     }
     $('#ctl-cam').classList.toggle('off', !C.camOn);
     $('#ctl-mic').classList.toggle('off', C.muted);
+    startSelfProbe();
     renderTiles();
     ws({ type: 'call:state', payload: { callId: call.id, state: { muted: C.muted, camera: C.camOn } } });
     clearInterval(C.timer);
@@ -703,50 +775,76 @@
 
   function tuneSender(sender, mode) {
     try {
+      if (mode === 'audio') {
+        // голос: узкополосный поток с приоритетом непрерывности — так меньше задержки и «кваканья»
+        const pa = sender.getParameters();
+        if (!pa.encodings || !pa.encodings.length) pa.encodings = [{}];
+        pa.encodings[0].maxBitrate = 64000;
+        pa.encodings[0].networkPriority = 'high';
+        pa.degradationPreference = 'maintain-framerate';
+        if (sender.track) sender.track.contentHint = 'speech';
+        sender.setParameters(pa).catch(() => {});
+        return;
+      }
       const p = sender.getParameters();
       if (!p.encodings || !p.encodings.length) p.encodings = [{}];
       if (mode === 'screen') {
         p.encodings[0].maxBitrate = 2500000;
         p.encodings[0].maxFramerate = 30;
         p.degradationPreference = 'maintain-resolution';
+        if (sender.track) sender.track.contentHint = 'detail';
       } else {
         p.encodings[0].maxBitrate = 900000;
         p.encodings[0].maxFramerate = 30;
         p.degradationPreference = 'balanced';
+        if (sender.track) sender.track.contentHint = 'motion';
       }
       sender.setParameters(p).catch(() => {});
-    } catch {}
+    } catch (err) {
+      console.warn('[call] tuneSender', err);
+    }
   }
 
+  /** Демонстрация экрана: берём системный поток и подменяем видеодорожку во всех соединениях. */
   async function toggleScreen() {
     if (!C.call) return;
     if (C.sharing) return stopScreen();
     if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-      toast('Этот браузер не умеет показывать экран. В приложении (.exe) демонстрация доступна через системное окно Windows.', 'err', 8000);
+      toast('Этот браузер не умеет показывать экран. Откройте приложение (.exe) — там демонстрация идёт через системное окно Windows.', 'err', 8000);
       return;
     }
+    let stream;
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: { frameRate: { ideal: 30, max: 30 }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          frameRate: { ideal: 30, max: 30 },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
         audio: false,
       });
-      C.screenStream = stream;
-      const track = stream.getVideoTracks()[0];
-      if (track.setContentHint) track.contentHint = 'detail';
-      C.screenStreamTrack = track;
-      C.sharing = true;
-      await setVideoOnPeers(track, stream);
-      const localVideo = $(`.call-tile[data-user="${me()}"] video`);
-      if (localVideo) { localVideo.srcObject = stream; localVideo.play().catch(() => {}); }
-      $('#ctl-screen').classList.add('active');
-      ws({ type: 'call:state', payload: { callId: C.call.id, state: { screen: true } } });
-      track.onended = () => stopScreen();
-      renderTiles();
-      toast('Демонстрация экрана началась 🖥', 'ok');
     } catch (err) {
-      if (err.name === 'NotAllowedError') toast('Демонстрация отменена: нужно выбрать окно или экран в системном окне');
-      else toast('Не удалось начать демонстрацию: ' + err.message, 'err', 7000);
+      if (err && err.name === 'NotAllowedError') toast('Демонстрация отменена: в системном окне нужно выбрать экран или окно');
+      else toast('Не удалось начать демонстрацию: ' + (err && err.message ? err.message : err), 'err', 7000);
+      return;
     }
+
+    const track = stream.getVideoTracks()[0];
+    if (!track) { try { stream.getTracks().forEach((t) => t.stop()); } catch {} toast('Не удалось получить картинку экрана', 'err', 6000); return; }
+    if (track.setContentHint) track.contentHint = 'detail';   // текст должен оставаться резким
+    try { await track.applyConstraints({ width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } }); } catch {}
+
+    C.screenStream = stream;
+    C.screenStreamTrack = track;
+    C.sharing = true;
+    await setVideoOnPeers(track, stream);
+    const localVideo = $(`.call-tile[data-user="${me()}"] video`);
+    if (localVideo) { localVideo.srcObject = stream; localVideo.play().catch(() => {}); }
+    $('#ctl-screen').classList.add('active');
+    ws({ type: 'call:state', payload: { callId: C.call.id, state: { screen: true } } });
+    track.onended = () => stopScreen();      // нажали «Остановить демонстрацию» в системной панели
+    renderTiles();
+    toast('Демонстрация экрана началась', 'ok');
   }
 
   async function stopScreen() {
@@ -774,6 +872,8 @@
   function teardown() {
     if (C.call) for (const [uid] of C.peers) ws({ type: 'call:signal', payload: { callId: C.call.id, to: uid, data: { bye: true } } });
     stopRing();
+    stopSelfProbe();
+    clearTimeout(C.tilesTimer); C.tilesTimer = 0;
     for (const [, entry] of C.peers) { try { entry.pc.close(); } catch {} }
     C.peers.clear();
     if (C.effectRAF) cancelAnimationFrame(C.effectRAF);
@@ -802,7 +902,7 @@
     hideMini();
     const bar = document.createElement('div');
     bar.className = 'call-mini';
-    bar.textContent = '🎥 Вернуться к звонку';
+    bar.textContent = 'Вернуться к звонку';
     bar.onclick = show;
     document.body.appendChild(bar);
     C.mini = bar;

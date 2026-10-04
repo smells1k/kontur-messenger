@@ -56,6 +56,7 @@ jobs:
             release/reset-data.bat
             release/connect-to-server.bat
             release/reset-data.js
+            release/ОБНОВЛЕНИЕ-И-ОЧИСТКА.txt
           if-no-files-found: error
 
       - name: Публикация релиза (только для тега)
@@ -94,8 +95,20 @@ jobs:
               `KonturServer.exe --server http://ВАШ-АДРЕС:4000` (или `connect-to-server.bat`) —
               откроется окно-приложение, где разрешения уже выданы.
 
+            ### Обновились, а «ничего не изменилось»?
+            1) закройте окно сервера (Ctrl+C) и окно мессенджера; 2) замените старый `KonturServer.exe`
+            новым файлом (поверх старого он не обновляется); 3) запустите и нажмите `Ctrl+F5`;
+            4) проверьте версию: «Настройки» → «Служебное». Подробно — в `ОБНОВЛЕНИЕ-И-ОЧИСТКА.txt`.
+            Начиная с этой версии клиент сам проверяет GitHub и показывает плашку «Доступна новая версия».
+
+            ### Зачистить сервер
+            `reset-data.bat` рядом с exe (двойной клик) · или `KonturServer.exe --fresh` ·
+            или удалить папку `%LOCALAPPDATA%\Kontur\data`. Только демо-аккаунты и бота убирает
+            `--purge-demo` — ваши переписки остаются на месте.
+
             ### Полезные флаги
             `--fresh` — один раз стереть базу, файлы и настройки и начать с нуля ·
+            `--purge-demo` — удалить только демо-аккаунты, бота и их чаты ·
             `--tunnel` — доступ из интернета по https-ссылке · `--server АДРЕС` — подключиться к чужому серверу ·
             `--https` — HTTPS с самоподписанным сертификатом · `--closed` — закрыть регистрацию ·
             `--port 4100`, `--data D:\chat`, `--browser`.
@@ -107,6 +120,7 @@ jobs:
             release/reset-data.bat
             release/connect-to-server.bat
             release/reset-data.js
+            release/ОБНОВЛЕНИЕ-И-ОЧИСТКА.txt
           draft: false
           allowUpdates: true
           generate_release_notes: true

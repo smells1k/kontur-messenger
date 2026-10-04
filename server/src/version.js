@@ -4,7 +4,7 @@
  * при сборке .exe — генерируется скриптом scripts/make-windows-exe.sh
  * (чтобы версия была видна и внутри упакованного файла).
  */
-let version = '1.0.6';
+let version = '1.0.7';
 let builtAt = '';
 
 try {

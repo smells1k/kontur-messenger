@@ -41,6 +41,8 @@ function createApi({ core, store, secret, config }) {
       users: Object.keys(store.data.users).length,
       chats: Object.keys(store.data.chats).length,
       messages: Object.keys(store.data.messages).length,
+      build: config.buildDate || '',
+      dataDir: config.dataDir,
       time: Date.now(),
     });
   });
@@ -219,6 +221,44 @@ function createApi({ core, store, secret, config }) {
     res.json({ results });
   }));
 
+  /**
+   * История чатов: все сообщения из всех чатов пользователя (для панели «История»).
+   * Параметры: q — поиск по тексту, chatId — только один чат, limit/offset — порции.
+   */
+  api.get('/history', auth, wrap((req, res) => {
+    const q = cleanText(req.query.q || '', 64).toLowerCase();
+    const onlyChat = String(req.query.chatId || '');
+    const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
+    const offset = Math.max(Number(req.query.offset) || 0, 0);
+
+    const chats = store.chatsOf(req.user.id);
+    const rows = [];
+    for (const chat of chats) {
+      if (onlyChat && chat.id !== onlyChat) continue;
+      for (const id of store.messageIds(chat.id)) {
+        const m = store.getMessage(id);
+        if (!m || m.deleted) continue;
+        if (m.system) continue;
+        if (q && !String(m.text || '').toLowerCase().includes(q)) continue;
+        rows.push({
+          chatId: chat.id,
+          chatTitle: chat.type === 'direct'
+            ? ((store.getUser((chat.members || []).find((x) => x !== req.user.id)) || {}).displayName || chat.title || 'Личный чат')
+            : (chat.title || 'Группа'),
+          chatType: chat.type,
+          message: core.publicMessage(m),
+        });
+      }
+    }
+    rows.sort((a, b) => (b.message.createdAt || 0) - (a.message.createdAt || 0));
+    res.json({
+      total: rows.length,
+      chats: chats.length,
+      messages: rows.slice(offset, offset + limit),
+      hasMore: rows.length > offset + limit,
+    });
+  }));
+
   /* --------------------------------------------------------------- сообщения */
 
   api.patch('/messages/:id', auth, wrap((req, res) => {
@@ -232,7 +272,7 @@ function createApi({ core, store, secret, config }) {
   }));
 
   api.post('/messages/:id/reactions', auth, wrap((req, res) => {
-    const m = core.toggleReaction(req.user.id, req.params.id, (req.body || {}).emoji || '👍');
+    const m = core.toggleReaction(req.user.id, req.params.id, (req.body || {}).emoji || '+1');
     res.json({ message: core.publicMessage(m) });
   }));
 

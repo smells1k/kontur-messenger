@@ -119,7 +119,9 @@
     demoMode: false,        // включает сервер флагом --demo (демо-аккаунты и бот)
     usersCache: [],
     call: null,
-    settings: Object.assign({ theme: 'dark', notifications: true, sounds: true, enterSends: true, previews: true },
+    liveCalls: new Map(),      // chatId -> активный звонок (для кнопки «присоединиться», без всплывашек)
+    history: { open: false, q: '', chatId: '', offset: 0, total: 0, hasMore: false, items: [] },
+    settings: Object.assign({ theme: 'dark', notifications: true, sounds: true, enterSends: true, previews: true, checkUpdates: true },
       JSON.parse(localStorage.getItem('k.settings') || '{}')),
   };
   const conn = { ws: null, state: 'offline', retry: 0, timer: null, ping: 0, sent: 0 };
@@ -259,7 +261,7 @@
     const box = $('#chat-list');
     if (!items.length) {
       box.innerHTML = `<div style="padding:26px;text-align:center;color:var(--text-2);font-size:13.5px">
-        ${q ? 'Ничего не найдено' : (S.filter === 'unread' ? 'Все прочитано 🎉' : 'Чатов пока нет')}</div>`;
+        ${q ? 'Ничего не найдено' : (S.filter === 'unread' ? 'Все прочитано' : 'Чатов пока нет')}</div>`;
       return;
     }
     box.innerHTML = items.map((c) => {
@@ -415,6 +417,14 @@
     const box = $('#messages');
     box.scrollTo({ top: box.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
   }
+  /** Свежий статус пользователя из кеша (чтобы зелёный индикатор не отставал). */
+  function liveUser(user) {
+    if (!user) return user;
+    if (S.me && user.id === S.me.id) return Object.assign({}, user, { online: true });
+    const live = S.users.get(user.id);
+    return live ? Object.assign({}, user, { online: live.online, lastSeen: live.lastSeen }) : user;
+  }
+
   function scrollToMessage(id) {
     const node = $(`[data-msg="${id}"]`);
     if (!node) return false;
@@ -462,14 +472,11 @@
     const pending = m.pending ? ' pending' : '';
 
     return `${dayHTML}<div class="msg ${mine ? 'own' : ''} ${grouped ? 'grouped' : ''}${pending}" data-msg="${m.id}">
-      ${grouped ? '<div class="avatar msg-avatar hidden"></div>' : avatarHTML(author, 'msg-avatar', chat.type === 'direct')}
+      ${grouped ? '<div class="avatar msg-avatar hidden"></div>' : avatarHTML(liveUser(author), 'msg-avatar', true)}
       <div class="bubble">
         <div class="msg-actions">
-          <button data-act="react" data-id="${m.id}" title="Реакция">😊</button>
-          <button data-act="reply" data-id="${m.id}" title="Ответить">↩</button>
-          ${mine ? `<button data-act="edit" data-id="${m.id}" title="Изменить">✏️</button>` : ''}
-          <button data-act="pin" data-id="${m.id}" title="Закрепить">📌</button>
-          <button data-act="more" data-id="${m.id}" title="Ещё">⋯</button>
+          <button data-act="react" data-id="${m.id}" title="Поставить реакцию">😊</button>
+          <button data-act="more" data-id="${m.id}" title="Ответить, изменить, закрепить…">⋯</button>
         </div>
         ${showAuthor ? `<div class="bubble-head"><span class="bubble-author">${esc(author.displayName)}${author.isBot ? ' 🤖' : ''}</span></div>` : ''}
         ${reply}
@@ -523,6 +530,141 @@
     $('#btn-scroll-down').hidden = true;
   }
 
+  /* ------------------------------------------------------------ история чатов */
+
+  /**
+   * «История чатов» — вся переписка целиком, в одном окне.
+   * Сервер отдаёт сообщения из всех чатов (см. GET /api/history), здесь мы их
+   * ищем, листаем и переносимся прямо к нужному сообщению в чате.
+   */
+  function openHistoryPanel() {
+    const st = S.history;
+    st.open = true;
+    st.offset = 0;
+    st.items = [];
+    const sel = $('#history-chat');
+    const opts = ['<option value="">Все чаты</option>'];
+    for (const c of chatList()) opts.push(`<option value="${c.id}">${esc(c.title)}</option>`);
+    sel.innerHTML = opts.join('');
+    sel.value = st.chatId || '';
+    $('#history-q').value = st.q || '';
+    $('#history-overlay').hidden = false;
+    loadHistory(true);
+    setTimeout(() => $('#history-q').focus(), 30);
+  }
+
+  function closeHistoryPanel() {
+    S.history.open = false;
+    const ov = $('#history-overlay');
+    if (ov) ov.hidden = true;
+  }
+
+  async function loadHistory(reset) {
+    const st = S.history;
+    if (reset) { st.offset = 0; st.items = []; }
+    st.q = ($('#history-q').value || '').trim();
+    st.chatId = $('#history-chat').value || '';
+    const box = $('#history-list');
+    if (reset) box.innerHTML = '<div class="history-empty">Загружаю историю…</div>';
+    try {
+      const d = await api(`/history?q=${encodeURIComponent(st.q)}&chatId=${encodeURIComponent(st.chatId)}&limit=100&offset=${st.offset}`);
+      st.total = d.total || 0;
+      st.hasMore = !!d.hasMore;
+      st.items = reset ? (d.messages || []) : st.items.concat(d.messages || []);
+      st.offset = st.items.length;
+      renderHistory();
+    } catch (err) {
+      st.hasMore = false;
+      box.innerHTML = `<div class="history-empty">Не удалось прочитать историю: ${esc(err.message)}</div>`;
+    }
+  }
+
+  function renderHistory() {
+    const st = S.history;
+    const box = $('#history-list');
+    $('#history-count').textContent = st.total ? `${st.total} сообщений` : '';
+    $('#btn-history-more').hidden = !st.hasMore;
+    if (!st.items.length) {
+      box.innerHTML = `<div class="history-empty">${st.q || st.chatId ? 'Ничего не найдено — попробуйте другое слово' : 'История пуста: тут появится вся ваша переписка'}</div>`;
+      return;
+    }
+    box.innerHTML = st.items.map((r) => {
+      const m = r.message;
+      const who = m.author ? m.author.displayName : 'Система';
+      const text = (m.text || '').trim() || (m.attachments && m.attachments.length ? '(вложение)' : '(без текста)');
+      return `<div class="history-row" data-chat="${r.chatId}" data-msg="${m.id}">
+        <div class="history-when">${esc(histDate(m.createdAt))}</div>
+        <div class="history-body">
+          <div class="history-chat">${esc(r.chatTitle)}${r.chatType === 'group' ? ' · группа' : ''} · <span class="history-author">${esc(who)}</span></div>
+          <div class="history-text">${esc(text).slice(0, 300)}</div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  function histDate(ts) {
+    const d = new Date(ts);
+    const now = new Date();
+    const day = d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: d.getFullYear() === now.getFullYear() ? undefined : '2-digit' });
+    const time = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    return `${day} ${time}`;
+  }
+
+  /** Переход из истории прямо к сообщению: догружаем страницы, пока оно не появится. */
+  async function goToMessage(chatId, msgId) {
+    closeHistoryPanel();
+    await openChat(chatId);
+    for (let i = 0; i < 30; i++) {
+      if (getList(chatId).some((m) => m.id === msgId)) break;
+      if (!(S.hasMore && S.hasMore[chatId])) break;
+      await loadMoreHistory();
+    }
+    setTimeout(() => { if (!scrollToMessage(msgId)) toast('Сообщение не найдено — возможно, оно удалено', 'err'); }, 70);
+  }
+
+  /** Выгрузка истории в текстовый файл (открывается в любом блокноте). */
+  async function exportHistory() {
+    const st = S.history;
+    const btn = $('#btn-history-export');
+    btn.disabled = true;
+    btn.textContent = 'Собираю…';
+    try {
+      const all = [];
+      for (let offset = 0; offset < 5000; offset += 500) {
+        const d = await api(`/history?q=${encodeURIComponent(st.q)}&chatId=${encodeURIComponent(st.chatId)}&limit=500&offset=${offset}`);
+        all.push(...(d.messages || []));
+        if (!d.hasMore) break;
+      }
+      all.sort((a, b) => (a.message.createdAt || 0) - (b.message.createdAt || 0));
+      const lines = all.map((r) => {
+        const m = r.message;
+        const who = m.author ? m.author.displayName : 'Система';
+        return `[${new Date(m.createdAt).toLocaleString('ru-RU')}] ${r.chatTitle} — ${who}: ${m.text || ''}`;
+      });
+      const head = `История чатов «Контур»\nВыгружено: ${new Date().toLocaleString('ru-RU')}\nСообщений: ${lines.length}\n\n`;
+      const blob = new Blob([head + lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'kontur-history-' + new Date().toISOString().slice(0, 10) + '.txt';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      toast('История сохранена в файл', 'ok');
+    } catch (err) {
+      toast('Не удалось выгрузить историю: ' + err.message, 'err');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Скачать .txt';
+    }
+  }
+
+  let historyTimer = null;
+  function historySearchDebounced() {
+    clearTimeout(historyTimer);
+    historyTimer = setTimeout(() => loadHistory(true), 250);
+  }
+
   /* ------------------------------------------------------------ заголовок чата */
   function renderChatHeader() {
     const chat = getChat(S.activeId);
@@ -546,6 +688,31 @@
     }
     $('#chat-view').dataset.type = chat.type;
     $('#btn-call-audio').hidden = false;
+    renderCallChip();
+  }
+
+  /** Тихая метка активного звонка в шапке чата: видно только внутри этого чата. */
+  function renderCallChip() {
+    const host = document.querySelector('.chat-head-actions');
+    if (!host) return;
+    let chip = document.getElementById('call-chip');
+    const call = S.activeId ? S.liveCalls.get(S.activeId) : null;
+    const busy = !!(K.calls && K.calls.state && K.calls.state.call);
+    if (!call || busy || !S.activeId) { if (chip) chip.remove(); return; }
+    if (!chip) {
+      chip = document.createElement('button');
+      chip.id = 'call-chip';
+      chip.className = 'btn sm primary call-chip';
+      chip.onclick = () => {
+        const c = S.activeId ? S.liveCalls.get(S.activeId) : null;
+        if (!c) return;
+        wsSend({ type: 'call:join', payload: { callId: c.id } });
+      };
+      host.insertBefore(chip, host.firstChild);
+    }
+    const people = call.participants ? call.participants.length : 1;
+    chip.textContent = (call.kind === 'audio' ? 'Идёт аудиозвонок' : 'Идёт видеозвонок') +
+      ' · ' + people + ' ' + (people === 1 ? 'участник' : 'участников') + ' · присоединиться';
   }
 
   function renderPinned() {
@@ -721,14 +888,11 @@
         $('#me-avatar').outerHTML = avatarHTML(p.me, '', true, 'me-avatar');
         setSeq(p.seq);
         if (p.devices > 1) toast(`Устройств в сети: ${p.devices} — синхронизация включена`);
-        if (p.calls && p.calls.length) {
-          const c = p.calls[0];
-          const chat = getChat(c.chatId);
-          const el = document.createElement('div');
-          el.innerHTML = `<div class="toast">🎥 В чате «${esc(chat ? chat.title : 'группа')}» идёт звонок. <button class="btn sm primary" id="join-call">Присоединиться</button></div>`;
-          $('#toasts').appendChild(el.lastChild);
-          $('#join-call').onclick = () => { el.lastChild.remove(); openChat(c.chatId); wsSend({ type: 'call:join', payload: { callId: c.id } }); };
-        }
+        S.liveCalls.clear();
+        for (const c of (p.calls || [])) if (c && c.chatId) S.liveCalls.set(c.chatId, c);
+        S.me.online = true;
+        renderChats();
+        renderCallChip();
         break;
       }
       case 'sync:events': for (const ev of (p.events || [])) applyRemote(ev.type, ev.payload, true); break;
@@ -824,9 +988,17 @@
       }
       case 'call:incoming': case 'call:ended': case 'call:peer-joined': case 'call:peer-left':
       case 'call:peer-declined': case 'call:signal': case 'call:started': case 'call:joined':
-      case 'call:state':
+      case 'call:state': {
+        // Кнопка «присоединиться» живёт в шапке чата — никаких всплывающих уведомлений.
+        if (type === 'call:ended') {
+          for (const [cid, c] of S.liveCalls) if (c.id === (p.callId || (p.call && p.call.id))) S.liveCalls.delete(cid);
+        } else if (p && p.call && p.call.chatId) {
+          S.liveCalls.set(p.call.chatId, p.call);
+        }
+        renderCallChip();
         if (window.K && K.calls) K.calls.onEvent(type, p);
         break;
+      }
       default: break;
     }
   }
@@ -1222,6 +1394,7 @@
           <div class="row-gap">
             <button class="btn ghost sm" id="s-devices">📱 Устройства</button>
             <button class="btn ghost sm" id="s-sync">🔄 Полная синхронизация</button>
+            <button class="btn ghost sm" id="s-update">⬆ Проверить обновления</button>
             <button class="btn ghost sm" id="s-clear">🧹 Очистить локальные данные</button>
             <button class="btn ghost sm" id="s-logout">🚪 Выйти</button>
           </div>
@@ -1309,11 +1482,43 @@
           }
         });
         fillDeviceList();
+        const upd = $('#s-update');
+        if (upd) upd.onclick = async () => {
+          upd.disabled = true; upd.textContent = 'Проверяю…';
+          try {
+            const u = await api('/server/update');
+            if (u.hasUpdate) {
+              toast(`Вышла новая версия ${u.latest} — сейчас откроется страница загрузки`, 'ok', 8000);
+              window.open(u.url || u.exe || u.zip, '_blank');
+            } else if (u.unknown) toast('Не удалось проверить: нет доступа к GitHub (это не мешает работе мессенджера)', 'err', 7000);
+            else toast(`У вас последняя версия ${u.current}`, 'ok', 5000);
+          } catch (err) { toast('Проверка не удалась: ' + err.message, 'err'); }
+          upd.disabled = false; upd.textContent = '⬆ Проверить обновления';
+        };
         api('/server/info').then((info) => {
           const same = String(info.version) === String(BUILD.version);
           $('#s-info').innerHTML = `Сервер: <b>${esc(info.name)}</b> v${esc(info.version)} · пользователей: ${info.users}, чатов: ${info.chats}, сообщений: ${info.messages}<br>`
             + `Клиент: v${esc(BUILD.version)}${BUILD.date ? ' (сборка ' + esc(BUILD.date) + ')' : ''}${same ? ' · совпадает с сервером ✅' : ' · ⚠️ версии разные: обновите страницу (Ctrl+F5)'}<br>`
-            + `Событий синхронизации: ${S.seq} · задержка: ${conn.ping} мс`;
+            + `Событий синхронизации: ${S.seq} · задержка: ${conn.ping} мс`
+            + (info.dataDir ? `<br>Папка данных сервера: <code>${esc(info.dataDir)}</code> — чтобы стереть базу, закройте сервер, удалите эту папку (или запустите KonturServer.exe с флагом --fresh) и запустите снова.` : '');
+          // «Адрес для друзей»: настоящие сетевые адаптеры (виртуальные Hyper-V/VMware не подходят)
+          fetch('/health').then((r) => r.json()).then((h) => {
+            const lan = h.lan || [];
+            const real = lan.filter((a) => !a.virtual);
+            if (!real.length) return;
+            const port = location.port || (location.protocol === 'https:' ? '443' : '80');
+            const links = real.map((a) => `<b>${location.protocol}//${a.address}:${port}</b>`).join(', ');
+            const info2 = $('#s-info');
+            if (!info2) return;
+            if (h.tunnel) {
+              info2.insertAdjacentHTML('afterbegin',
+                `Ссылка для друзей из интернета: <b>${esc(h.tunnel)}</b> (работает, пока запущен сервер и туннель)<br>`);
+            }
+            info2.insertAdjacentHTML('afterbegin',
+              `Адрес для друзей (в той же сети): ${links} — ${real.map((a) => a.name).join(', ')}<br>`
+              + (lan.some((a) => a.virtual) ? '<span style="opacity:.65">Виртуальные адаптеры друзьям не подходят — они в списке не показаны.</span><br>' : '')
+              + '<span style="opacity:.65">Из интернета: запустите сервер с флагом --tunnel — получите https-ссылку, и камера с микрофоном заработают у всех.</span><br>');
+          }).catch(() => {});
         }).catch(() => {});
       });
   }
@@ -1564,6 +1769,17 @@
         { id: 'del', icon: '🗑', label: 'Удалить чат у себя', danger: true, run: () => api('/chats/' + chat.id, { method: 'DELETE' }).then(() => { S.chats.delete(chat.id); if (S.activeId === chat.id) closeChat(); renderChats(); }).catch((err) => toast(err.message, 'err')) },
       ]);
     });
+    $('#btn-history').addEventListener('click', openHistoryPanel);
+    $('#btn-history-close').addEventListener('click', closeHistoryPanel);
+    $('#btn-history-more').addEventListener('click', () => loadHistory(false));
+    $('#btn-history-export').addEventListener('click', exportHistory);
+    $('#history-q').addEventListener('input', historySearchDebounced);
+    $('#history-chat').addEventListener('change', () => loadHistory(true));
+    $('#history-overlay').addEventListener('click', (e) => { if (e.target === $('#history-overlay')) closeHistoryPanel(); });
+    $('#history-list').addEventListener('click', (e) => {
+      const row = e.target.closest('.history-row');
+      if (row) goToMessage(row.dataset.chat, row.dataset.msg);
+    });
     $('#btn-new-chat').addEventListener('click', () => openUsersPicker('direct'));
     $('#btn-new-chat-2').addEventListener('click', () => openUsersPicker('group'));
     $('#btn-profile').addEventListener('click', () => { if (S.me) openSettings(); });
@@ -1716,7 +1932,7 @@
 
     // клавиатура
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') { closeModal(); $('#lightbox').hidden = true; $('#context-menu').hidden = true; $('#menu-overlay').hidden = true; }
+      if (e.key === 'Escape') { closeModal(); $('#lightbox').hidden = true; $('#context-menu').hidden = true; $('#menu-overlay').hidden = true; if (S.history.open) closeHistoryPanel(); }
       if ((e.ctrlKey || e.metaKey) && e.key === 'f' && S.activeId) { e.preventDefault(); $('#search-bar').hidden = false; $('#chat-search-input').focus(); }
     });
     document.addEventListener('visibilitychange', () => { if (document.hasFocus()) { markRead(); renderChats(); } });
@@ -2012,12 +2228,54 @@
     if (btn) btn.onclick = () => { try { location.reload(true); } catch { location.reload(); } };
   }
 
+  /**
+   * Раз в сутки тихо спрашиваем GitHub, нет ли новой версии.
+   * Так больше не бывает «скачал, а ничего не изменилось»: если вышла новая сборка,
+   * сверху появится плашка со ссылкой на скачивание.
+   */
+  async function checkForUpdates() {
+    if (!S.settings.checkUpdates) return;
+    const last = Number(localStorage.getItem('k.update-check') || 0);
+    if (Date.now() - last < 24 * 3600 * 1000) { showUpdateBanner(); return; }
+    try {
+      const u = await api('/server/update');
+      localStorage.setItem('k.update-check', String(Date.now()));
+      if (u && u.hasUpdate) {
+        localStorage.setItem('k.update-info', JSON.stringify({ latest: u.latest, url: u.url || u.exe || u.zip }));
+      } else {
+        localStorage.removeItem('k.update-info');
+      }
+    } catch { /* сервер без интернета — ничего страшного */ }
+    showUpdateBanner();
+  }
+
+  function showUpdateBanner() {
+    let raw = null;
+    try { raw = JSON.parse(localStorage.getItem('k.update-info') || 'null'); } catch {}
+    if (!raw || !raw.latest) return;
+    const bar = $('#update-banner');
+    if (!bar) return;
+    bar.hidden = false;
+    $('#update-text').textContent = `Доступна новая версия ${raw.latest}. У вас ${BUILD.version}. Скачайте новый файл и запустите его — данные и переписка сохранятся.`;
+    $('#update-download').onclick = () => window.open(raw.url, '_blank');
+    $('#update-hide').onclick = () => { bar.hidden = true; localStorage.setItem('k.update-hide', raw.latest); };
+    if (localStorage.getItem('k.update-hide') === raw.latest) bar.hidden = true;
+  }
+
   async function init() {
     applyTheme();
     bindStaleReload();
     try {
       const info = await api('/server/info');
       checkBuild(info);
+      // ссылка из интернета (если сервер запущен с --tunnel) — показываем прямо в интерфейсе
+      try {
+        const h = await fetch('/health').then((r) => r.json());
+        if (h.tunnel && !sessionStorage.getItem('k.tunnel-shown')) {
+          sessionStorage.setItem('k.tunnel-shown', h.tunnel);
+          setTimeout(() => toast(`🌍 Ссылка для друзей из интернета: ${h.tunnel}`, 'ok', 20000), 2000);
+        }
+      } catch { /* туннеля нет — обычный режим */ }
       $('#server-url').textContent = location.host || 'localhost';
       $('#server-status').textContent = `сервер на связи · v${info.version}`;
       S.demoMode = !!info.demoMode;
@@ -2034,6 +2292,7 @@
       const v = $('#auth-version');
       if (v) v.textContent = `версия клиента: ${BUILD.version}${BUILD.date ? ' · сборка ' + BUILD.date : ''}`;
     }
+    checkForUpdates();
     bindUI();
     window.addEventListener('beforeunload', () => { try { conn.ws && conn.ws.close(); } catch {} });
     if (S.token) boot();

@@ -70,6 +70,9 @@
         <input id="search" placeholder="Поиск чатов и людей…" autocomplete="off">
         <button class="icon-btn tiny" id="btn-search-clear" hidden title="Очистить">✕</button>
       </div>
+      <button class="icon-btn" id="btn-history" title="История чатов">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+      </button>
       <button class="icon-btn" id="btn-new-chat" title="Новый чат / группа">
         <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
       </button>
@@ -200,6 +203,28 @@
 <!-- ============================ МОДАЛЬНЫЕ ОКНА ============================ -->
 <div class="overlay" id="modal" hidden><div class="modal" id="modal-box"></div></div>
 <div class="overlay" id="menu-overlay" hidden></div>
+
+<!-- ============================== ИСТОРИЯ ЧАТОВ ============================== -->
+<div class="overlay" id="history-overlay" hidden>
+  <div class="history-card" role="dialog" aria-label="История чатов">
+    <header class="history-head">
+      <b>История чатов</b>
+      <span class="history-count" id="history-count"></span>
+      <span class="history-spacer"></span>
+      <button class="btn ghost sm" id="btn-history-export" title="Сохранить историю в текстовый файл">Скачать .txt</button>
+      <button class="icon-btn tiny" id="btn-history-close" title="Закрыть">✕</button>
+    </header>
+    <div class="history-search">
+      <input id="history-q" placeholder="Поиск по всей истории: слово или фраза…" autocomplete="off">
+      <select id="history-chat" title="Только один чат"></select>
+    </div>
+    <div class="history-list" id="history-list"></div>
+    <footer class="history-foot">
+      <button class="btn sm" id="btn-history-more" hidden>Показать ещё</button>
+      <span class="history-hint">Сообщения хранятся на вашем сервере целиком — тут видно всю переписку, даже очень старую.</span>
+    </footer>
+  </div>
+</div>
 <div id="context-menu" class="context-menu" hidden></div>
 <div id="toasts" class="toasts"></div>
 
@@ -239,6 +264,11 @@
 <div id="lightbox" class="lightbox" hidden><img id="lightbox-img" alt=""><button class="icon-btn" id="lightbox-close">✕</button></div>
 
 <div id="offline-banner" class="offline-banner" hidden>⚡️ Нет соединения с сервером — сообщения отправятся автоматически</div>
+<div id="update-banner" class="stale-banner update-banner" hidden>
+  <span id="update-text">Доступна новая версия</span>
+  <button class="btn sm primary" id="update-download">Скачать</button>
+  <button class="btn sm ghost" id="update-hide">Позже</button>
+</div>
 <div id="stale-banner" class="stale-banner" hidden>
   <span id="stale-text">Обновилась версия — загрузите страницу заново</span>
   <button class="btn sm primary" id="stale-reload">Обновить сейчас</button>
