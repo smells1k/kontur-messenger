@@ -1,5 +1,9 @@
 # 💬 Мессенджер «Контур»
 
+[![Сборка .exe](https://github.com/smells1k/kontur-messenger/actions/workflows/build-release.yml/badge.svg)](https://github.com/smells1k/kontur-messenger/actions/workflows/build-release.yml)
+[![Скачать](https://img.shields.io/badge/download-KonturServer.exe-6c8cff)](https://github.com/smells1k/kontur-messenger/releases/latest)
+[![Лицензия: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
 Мессенджер целиком на **Node.js**: свой сервер (Express + WebSocket), веб-клиент и **готовые `.exe`** для Windows.
 Текст, файлы, картинки, голосовые, эмодзи (1870 шт.), группы, реакции, ответы, закрепления, поиск,
 **видеозвонки и демонстрация экрана (WebRTC)** и **синхронизация между всеми устройствами**.
@@ -16,6 +20,9 @@
 ## 🚀 Быстрый старт
 
 ### Вариант 1 — готовый `.exe` (Windows, ничего ставить не надо)
+
+**Скачать: [KonturServer.exe](https://github.com/smells1k/kontur-messenger/releases/latest)** (собирается автоматически на GitHub Actions)
+
 
 1. Скопируйте папку `release/` на компьютер с Windows.
 2. Двойной клик по **`KonturServer.exe`** → поднимется сервер и **само откроется окно мессенджера**
