@@ -43,7 +43,13 @@ const HOST = String(arg('host', process.env.HOST || '0.0.0.0'));
 const OPEN_APP = !has('no-open');
 const APP_MODE = !has('browser');
 const QUIET = has('quiet');
-const USE_TUNNEL = has('tunnel') || process.env.KONTUR_TUNNEL === '1';
+const TUNNEL_ARG = arg('tunnel', process.env.KONTUR_TUNNEL_TOKEN || null);
+const USE_TUNNEL = has('tunnel') || !!process.env.KONTUR_TUNNEL || !!process.env.KONTUR_TUNNEL_TOKEN;
+/** Токен именного туннеля Cloudflare (Zero Trust) — тогда адрес постоянный, на своём домене. */
+const TUNNEL_TOKEN = (() => {
+  if (!TUNNEL_ARG || TUNNEL_ARG === '1' || TUNNEL_ARG === 'true') return null;
+  return TUNNEL_ARG.length > 40 ? TUNNEL_ARG : null;
+})();
 
 if (has('help') || has('h')) {
   console.log(`
@@ -60,6 +66,11 @@ if (has('help') || has('h')) {
   --tunnel        открыть доступ из интернета через Cloudflare Tunnel:
                   получится ссылка вида https://что-то.trycloudflare.com — её можно
                   дать друзьям в любой сети, камера и микрофон там разрешены
+                  (имя случайное и меняется при перезапуске)
+  --tunnel ТОКЕН  постоянный адрес на своём домене: возьмите токен туннеля в панели
+                  Cloudflare Zero Trust (Networks → Tunnels), добавьте Public hostname
+                  вида kontur.ваш-домен.ру → http://localhost:4000 и запустите так.
+                  Адрес всегда один и тот же. Домен подключается к Cloudflare бесплатно.
   --closed        закрыть регистрацию (полезно вместе с --tunnel)
   --server URL    подключиться к ЧУЖОМУ серверу (свой сервер не запускается):
                   KonturServer.exe --server http://192.168.1.10:4000
@@ -255,13 +266,20 @@ function cloudflaredBin() {
 /** Поднимает Cloudflare Tunnel и печатает публичную https-ссылку. */
 function startTunnel() {
   const bin = cloudflaredBin();
+  const named = !!TUNNEL_TOKEN;
   console.log('');
-  console.log('  🌍 Открываю доступ из интернета (Cloudflare Tunnel)…');
+  console.log(named
+    ? '  🌍 Подключаю постоянный адрес (именной туннель Cloudflare)…'
+    : '  🌍 Открываю доступ из интернета (Cloudflare Tunnel)…');
   console.log(`     адрес внутри: http://127.0.0.1:${PORT}`);
+
+  const args = named
+    ? ['tunnel', '--no-autoupdate', 'run', '--token', TUNNEL_TOKEN]
+    : ['tunnel', '--no-autoupdate', '--url', `http://127.0.0.1:${PORT}`];
 
   let child;
   try {
-    child = spawn(bin, ['tunnel', '--no-autoupdate', '--url', `http://127.0.0.1:${PORT}`], { stdio: ['ignore', 'pipe', 'pipe'] });
+    child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
   } catch (err) {
     printTunnelHelp(err.message);
     return null;
@@ -286,6 +304,18 @@ function startTunnel() {
   };
   child.stdout.on('data', onData);
   child.stderr.on('data', onData);
+  if (named) {
+    console.log('');
+    console.log('  ┌───────────────────────────────────────────────────────────────┐');
+    console.log('  │  ✅ Постоянный адрес — тот, что вы задали в Cloudflare:       │');
+    console.log('  │     например https://kontur.ваш-домен.ру                      │');
+    console.log('  └───────────────────────────────────────────────────────────────┘');
+    console.log('     Он не меняется при перезапуске сервера. Камера, микрофон и');
+    console.log('     демонстрация экрана там работают — это HTTPS.');
+    console.log('     Если адрес не открывается — проверьте в панели Cloudflare:');
+    console.log('     Networks → Tunnels → Public hostname ведёт на http://localhost:' + PORT);
+    console.log('');
+  }
   child.on('error', (err) => printTunnelHelp(err.message));
   child.on('exit', (code) => { if (code && code !== 0) console.log(`  ⚠️ Туннель закрылся (код ${code}). Ссылка перестала работать.`); });
   process.on('exit', () => { try { child.kill(); } catch { /* уже закрыт */ } });
@@ -351,5 +381,5 @@ function printTunnelHelp(reason) {
     }, 300);
   }
 
-  if (USE_TUNNEL) setTimeout(startTunnel, 800);
+  if (USE_TUNNEL && !SERVER_URL) setTimeout(startTunnel, 800);
 })();
