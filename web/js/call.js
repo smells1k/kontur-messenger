@@ -201,6 +201,8 @@
     const pc = new RTCPeerConnection({ iceServers: iceServers(), iceCandidatePoolSize: 4, bundlePolicy: 'max-bundle' });
     const entry = {
       pc, userId, stream: null, tile: null, videoEl: null,
+      chain: Promise.resolve(),        // очередь сигналинга: описания обрабатываются по одному
+      closed: false,
       polite: String(me()) < String(userId),          // «вежливая» сторона уступает при конфликте офферов
       makingOffer: false, ignoreOffer: false, settingRemoteAnswer: false,
       audioEl: null, analyser: null, level: 0, restarting: false,
@@ -232,17 +234,19 @@
         return;
       }
       entry.negRetries = 0;
-      try {
-        entry.makingOffer = true;
-        const offer = await pc.createOffer();
-        if (pc.signalingState !== 'stable') return;   // за время подготовки пришёл встречный оффер
-        await pc.setLocalDescription(offer);
-        ws({ type: 'call:signal', payload: { callId: C.call.id, to: userId, data: { description: pc.localDescription } } });
-      } catch (err) {
-        console.warn('[call] negotiation', err);
-      } finally {
-        entry.makingOffer = false;
-      }
+      await enqueue(entry, async () => {
+        try {
+          entry.makingOffer = true;
+          const offer = await pc.createOffer();
+          if (pc.signalingState !== 'stable') return;   // за время подготовки пришёл встречный оффер
+          await pc.setLocalDescription(offer);
+          ws({ type: 'call:signal', payload: { callId: C.call.id, to: userId, data: { description: pc.localDescription } } });
+        } catch (err) {
+          console.warn('[call] negotiation', err && err.message || err);
+        } finally {
+          entry.makingOffer = false;
+        }
+      });
     };
     pc.onnegotiationneeded = negotiate;
     entry.negotiate = negotiate;
@@ -305,40 +309,64 @@
     }
   }
 
-  async function onDescription(userId, description) {
-    const entry = createPeer(userId);
+  /**
+   * Сигналинг — строго по очереди.
+   * Если обрабатывать описания параллельно, при одновременных офферах (glare)
+   * состояние соединения разъезжается и звонок не поднимается: одно описание
+   * успевает перевести pc в have-local-offer, пока другое ещё «в полёте».
+   */
+  function enqueue(entry, task) {
+    entry.chain = (entry.chain || Promise.resolve())
+      .then(task)
+      .catch((err) => console.warn('[call] сигналинг', err && err.message || err));
+    return entry.chain;
+  }
+
+  async function applyDescription(entry, description) {
     const pc = entry.pc;
-    try {
-      const readyForOffer = !entry.makingOffer && (pc.signalingState === 'stable' || entry.settingRemoteAnswer);
-      const offerCollision = description.type === 'offer' && !readyForOffer;
-      entry.ignoreOffer = !entry.polite && offerCollision;
-      if (entry.ignoreOffer) return;                      // «настойчивая» сторона игнорирует встречный оффер
-      if (offerCollision && entry.polite) {
-        // «вежливая» сторона откатывает свой оффер и принимает чужой
-        try { await pc.setLocalDescription({ type: 'rollback' }); } catch (err) { console.warn('[call] rollback', err); }
-      }
+    if (!pc || pc.signalingState === 'closed' || entry.closed) return;
 
-      entry.settingRemoteAnswer = description.type === 'answer';
-      await pc.setRemoteDescription(description);
-      entry.settingRemoteAnswer = false;
+    const readyForOffer = !entry.makingOffer && (pc.signalingState === 'stable' || entry.settingRemoteAnswer);
+    const offerCollision = description.type === 'offer' && !readyForOffer;
+    entry.ignoreOffer = !entry.polite && offerCollision;
+    if (entry.ignoreOffer) return;   // «настойчивая» сторона пропускает встречный оффер
 
-      if (description.type === 'offer') {
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        ws({ type: 'call:signal', payload: { callId: C.call.id, to: userId, data: { description: pc.localDescription } } });
-      }
-    } catch (err) {
-      console.warn('[call] description', err);
+    if (offerCollision && entry.polite && pc.signalingState === 'have-local-offer') {
+      // «вежливая» сторона откатывает свой оффер и принимает чужой
+      try { await pc.setLocalDescription({ type: 'rollback' }); } catch (err) { console.warn('[call] rollback', err && err.message || err); }
+    }
+
+    if (pc.signalingState === 'have-remote-offer' && description.type === 'offer') return; // уже приняли этот оффер
+    if (description.type === 'answer' && pc.signalingState !== 'have-local-offer') return;  // ответ на откатанный оффер — не наш
+
+    entry.settingRemoteAnswer = description.type === 'answer';
+    await pc.setRemoteDescription(description);
+    entry.settingRemoteAnswer = false;
+
+    if (description.type === 'offer') {
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      ws({ type: 'call:signal', payload: { callId: C.call.id, to: userIdOf(entry), data: { description: pc.localDescription } } });
     }
   }
 
-  async function onCandidate(userId, candidate) {
+  function userIdOf(entry) {
+    for (const [id, e] of C.peers) if (e === entry) return id;
+    return entry.userId;
+  }
+
+  function onDescription(userId, description) {
     const entry = createPeer(userId);
-    try {
+    entry.userId = userId;
+    return enqueue(entry, () => applyDescription(entry, description));
+  }
+
+  function onCandidate(userId, candidate) {
+    const entry = createPeer(userId);
+    return enqueue(entry, async () => {
+      if (entry.closed || entry.pc.signalingState === 'closed') return;
       await entry.pc.addIceCandidate(candidate);
-    } catch (err) {
-      if (!entry.ignoreOffer) console.warn('[call] candidate', err.message);
-    }
+    });
   }
 
   /* ------------------------------------------------------------------ плитки */

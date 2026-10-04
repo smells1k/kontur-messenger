@@ -30,7 +30,9 @@ jobs:
           for i in $(seq 1 20); do curl -sf http://localhost:4100/health >/dev/null && break || sleep 1; done
           node test/smoke.js http://localhost:4100
           node test/client-smoke.js http://localhost:4100
-          node test/call-e2e.js http://localhost:4100     # настоящий звонок: WebRTC, ICE, медиа, шаринг экрана
+          # настоящий звонок: WebRTC, ICE, медиа, демонстрация экрана.
+          # В облаке нет медиапутей, поэтому проверка соединения мягкая — сигналинг строгий.
+          CALL_E2E_SOFT_MEDIA=1 node test/call-e2e.js http://localhost:4100
           pkill -f "server.js --port 4100" || true
 
       - name: Тесты — демо-режим (--demo)
