@@ -93,7 +93,7 @@ function createWindow(url) {
     width: 1280, height: 840, minWidth: 900, minHeight: 600,
     backgroundColor: '#0f1420',
     title: 'Мессенджер «Контур»',
-    icon: path.join(__dirname, 'build', 'icon.png'),
+    icon: path.join(__dirname, 'icons', 'icon.png'),
     autoHideMenuBar: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),

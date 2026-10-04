@@ -1,7 +1,8 @@
 node_modules/
 data/
 docker-data/
-build/staging/
+build/
+launcher/dist/
 release/
 release-desktop/
 dist/

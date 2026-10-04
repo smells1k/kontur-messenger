@@ -9,8 +9,8 @@
     "install:deps": "cd server && npm install",
     "test": "cd server && node test/smoke.js",
     "test:client": "cd server && node test/client-smoke.js",
-    "build:exe": "bash build/make-windows-exe.sh",
-    "build:desktop": "bash build/build-electron-win.sh",
+    "build:exe": "bash scripts/make-windows-exe.sh",
+    "build:desktop": "bash scripts/build-electron-win.sh",
     "docker": "docker compose up -d"
   },
   "license": "MIT"

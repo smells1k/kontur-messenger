@@ -123,7 +123,7 @@ node server.js --open     # + автоматически открыть брау
 ### 1. `KonturServer.exe` — сервер + веб-клиент в одном файле (без установки Node на Windows)
 
 ```bash
-bash build/make-windows-exe.sh
+bash scripts/make-windows-exe.sh
 # → release/KonturServer.exe (≈56 МБ) + release/web/
 ```
 Внутрь `.exe` зашиваются Node.js 20, весь сервер и веб-клиент (сборка через
@@ -132,8 +132,8 @@ bash build/make-windows-exe.sh
 ### 2. Полноценное десктопное приложение (Electron + установщик NSIS)
 
 ```bash
-bash build/make-windows-exe.sh        # сначала сервер
-bash build/build-electron-win.sh      # → release-desktop/Kontur-Setup-1.0.0.exe, Kontur-Portable-1.0.0.exe
+bash scripts/make-windows-exe.sh        # сначала сервер
+bash scripts/build-electron-win.sh      # → release-desktop/Kontur-Setup-1.0.0.exe, Kontur-Portable-1.0.0.exe
 ```
 Скрипт скачает Electron и соберёт:
 - **установщик** с ярлыками и пунктом деинсталляции;

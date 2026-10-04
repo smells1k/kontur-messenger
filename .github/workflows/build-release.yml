@@ -34,7 +34,7 @@ jobs:
           node test/client-smoke.js http://localhost:4100
 
       - name: Сборка KonturServer.exe (Windows x64)
-        run: BUILD_LINUX_TOO=0 bash build/make-windows-exe.sh
+        run: BUILD_LINUX_TOO=0 bash scripts/make-windows-exe.sh
 
       - name: Артефакт «KonturServer-windows»
         uses: actions/upload-artifact@v4

@@ -15,7 +15,7 @@
 ## 1. `KonturServer.exe` (pkg)
 
 ```bash
-bash build/make-windows-exe.sh
+bash scripts/make-windows-exe.sh
 ```
 
 Что происходит по шагам:
@@ -60,7 +60,7 @@ npx rcedit release/KonturServer.exe --set-icon assets/icon.ico
 ## 2. Electron-приложение
 
 ```bash
-bash build/build-electron-win.sh     # сначала соберёт сервер, потом приложение
+bash scripts/build-electron-win.sh     # сначала соберёт сервер, потом приложение
 ```
 
 Что важно знать:
@@ -69,7 +69,7 @@ bash build/build-electron-win.sh     # сначала соберёт серве�
   либо используйте только portable-цель: `npx electron-builder --win portable`;
 - код сервера и веб-клиент кладутся в ресурсы приложения (`extraResources`), поэтому клиент
   умеет сам поднимать локальный сервер через `ELECTRON_RUN_AS_NODE` — Node.js пользователю не нужен;
-- иконка берётся из `desktop/build/icon.ico`, ярлыки создаются установщиком.
+- иконка берётся из `desktop/icons/icon.ico`, ярлыки создаются установщиком.
 
 ## 3. Docker (рекомендуется для постоянного сервера)
 

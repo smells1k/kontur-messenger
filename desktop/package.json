@@ -20,14 +20,14 @@
     "productName": "Kontur",
     "directories": {
       "output": "../release-desktop",
-      "buildResources": "build"
+      "buildResources": "icons"
     },
     "files": [
       "main.js",
       "preload.js",
       "settings.html",
-      "build/icon.ico",
-      "build/icon.png"
+      "icons/icon.ico",
+      "icons/icon.png"
     ],
     "extraResources": [
       {
@@ -66,7 +66,7 @@
           ]
         }
       ],
-      "icon": "build/icon.ico",
+      "icon": "icons/icon.ico",
       "artifactName": "Kontur-Setup-${version}.${ext}"
     },
     "nsis": {
@@ -75,8 +75,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Мессенджер Контур",
-      "installerIcon": "build/icon.ico",
-      "uninstallerIcon": "build/icon.ico"
+      "installerIcon": "icons/icon.ico",
+      "uninstallerIcon": "icons/icon.ico"
     },
     "portable": {
       "artifactName": "Kontur-Portable-${version}.exe"
@@ -85,7 +85,7 @@
       "target": [
         "AppImage"
       ],
-      "icon": "build/icon.png",
+      "icon": "icons/icon.png",
       "category": "Network"
     }
   }
