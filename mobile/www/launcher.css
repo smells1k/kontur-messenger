@@ -1,0 +1,174 @@
+/* ЭКРАН ЗАПУСКА «КОНТУРА» НА ANDROID
+   Тёмная тема как в мессенджере, крупные кнопки под палец,
+   учёт «челки» и системных панелей (safe-area). */
+
+:root {
+  --bg: #0f1420;
+  --bg-2: #161d2b;
+  --bg-3: #1d2637;
+  --line: rgba(255, 255, 255, .08);
+  --text: #e9eef8;
+  --muted: #93a0b8;
+  --accent: #6c8cff;
+  --accent-2: #8f6cff;
+  --ok: #4cd07d;
+  --err: #ff6b6b;
+  --warn: #ffc44d;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0;
+  background: radial-gradient(120% 80% at 50% 0%, #1a2438 0%, var(--bg) 55%) fixed;
+  color: var(--text);
+  font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  min-height: 100dvh;
+}
+
+body { overflow-x: hidden; }
+
+.wrap {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: max(18px, env(safe-area-inset-top)) 16px calc(28px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ------------------------------------------------------------------ шапка */
+.brand { display: flex; align-items: center; gap: 14px; padding: 6px 2px 2px; }
+.logo {
+  width: 62px; height: 62px; border-radius: 18px;
+  box-shadow: 0 10px 26px rgba(108, 140, 255, .28);
+}
+.brand-text h1 { margin: 0; font-size: 26px; letter-spacing: .2px; }
+.brand-text p { margin: 2px 0 0; color: var(--muted); font-size: 13.5px; }
+
+/* ------------------------------------------------------------------- карты */
+.card {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .05), rgba(255, 255, 255, .02));
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 16px;
+  backdrop-filter: blur(6px);
+}
+.card-head { display: flex; align-items: center; gap: 9px; font-size: 16px; }
+.card-head .icon { font-size: 17px; }
+.card-head b { font-weight: 600; }
+.hint { color: var(--muted); font-size: 14px; margin: 8px 0 12px; }
+
+.dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #5c6a85; flex: none;
+  box-shadow: 0 0 0 4px rgba(92, 106, 133, .18);
+  transition: background .2s, box-shadow .2s;
+}
+.dot.starting { background: var(--warn); box-shadow: 0 0 0 4px rgba(255, 196, 77, .18); animation: pulse 1.2s infinite; }
+.dot.ready { background: var(--ok); box-shadow: 0 0 0 4px rgba(76, 208, 125, .2); }
+.dot.error { background: var(--err); box-shadow: 0 0 0 4px rgba(255, 107, 107, .2); }
+@keyframes pulse { 50% { opacity: .45; } }
+
+/* ------------------------------------------------------------------ адреса */
+.status { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 14px; }
+.addr-row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  background: rgba(0, 0, 0, .22); border: 1px solid var(--line);
+  border-radius: 12px; padding: 10px 12px;
+}
+.addr-label { color: var(--muted); font-size: 12.5px; }
+.addr-row code {
+  font: 600 15px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #cfe0ff; word-break: break-all; text-align: right;
+}
+
+/* ------------------------------------------------------------------ кнопки */
+.btns { display: flex; flex-wrap: wrap; gap: 10px; }
+.btns + .btns { margin-top: 10px; }
+.btns.small .btn { min-height: 40px; font-size: 13.5px; padding: 8px 14px; }
+
+.btn {
+  appearance: none; border: 1px solid var(--line);
+  background: var(--bg-3); color: var(--text);
+  min-height: 48px; padding: 12px 18px;
+  border-radius: 13px; font-size: 15px; font-weight: 600;
+  cursor: pointer; flex: 1 1 auto;
+  transition: transform .06s ease, filter .15s ease;
+}
+.btn:active { transform: scale(.985); filter: brightness(1.08); }
+.btn[disabled] { opacity: .55; }
+.btn.primary {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  border-color: transparent; color: #fff;
+  box-shadow: 0 8px 22px rgba(108, 140, 255, .32);
+}
+.btn.ghost { background: transparent; }
+.btn.tiny { min-height: 32px; padding: 4px 10px; font-size: 12.5px; font-weight: 500; margin-left: auto; flex: 0 0 auto; }
+
+.row { display: flex; gap: 10px; }
+.row input {
+  flex: 1 1 auto; min-width: 0; min-height: 48px;
+  background: rgba(0, 0, 0, .25); color: var(--text);
+  border: 1px solid var(--line); border-radius: 13px;
+  padding: 12px 14px; font-size: 15px; outline: none;
+}
+.row input:focus { border-color: rgba(108, 140, 255, .65); }
+.row .btn { flex: 0 0 auto; }
+
+/* ---------------------------------------------------------------- «ещё» */
+.more { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+.more summary { color: var(--muted); font-size: 13.5px; cursor: pointer; }
+.more ol { color: var(--muted); font-size: 13.5px; padding-left: 20px; margin: 8px 0 0; }
+.more code { background: rgba(255, 255, 255, .07); padding: 1px 5px; border-radius: 5px; font-size: 12.5px; }
+
+/* ------------------------------------------------------------- недавние */
+.recent { margin-top: 12px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.chip {
+  background: var(--bg-3); color: #cfe0ff; border: 1px solid var(--line);
+  border-radius: 999px; padding: 7px 13px; font-size: 13px; cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* --------------------------------------------------------------- журнал */
+.log-card .card-head { justify-content: flex-start; }
+.log {
+  margin: 10px 0 0; max-height: 190px; overflow: auto;
+  background: rgba(0, 0, 0, .3); border: 1px solid var(--line); border-radius: 12px;
+  padding: 10px 12px; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #9fb0cc; white-space: pre-wrap; word-break: break-word;
+}
+
+/* --------------------------------------------------------------- подвал */
+.foot {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  color: var(--muted); font-size: 12.5px; padding-top: 6px; flex-wrap: wrap;
+}
+.foot a { color: var(--accent); text-decoration: none; }
+.sep { opacity: .5; }
+
+/* --------------------------------------------------------------- тост */
+.toast {
+  position: fixed; left: 50%; bottom: calc(22px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  background: rgba(28, 38, 56, .97); color: var(--text);
+  border: 1px solid var(--line); border-radius: 13px;
+  padding: 12px 18px; font-size: 14px; max-width: min(92vw, 460px);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .45);
+  z-index: 50; text-align: center;
+}
+
+/* --------------------------------------------------- планшеты и ландшафт */
+@media (min-width: 700px) {
+  .wrap { max-width: 720px; padding-top: max(26px, env(safe-area-inset-top)); }
+  .logo { width: 72px; height: 72px; }
+  .brand-text h1 { font-size: 30px; }
+}
+@media (orientation: landscape) and (max-height: 460px) {
+  .wrap { gap: 10px; }
+  .logo { width: 48px; height: 48px; border-radius: 14px; }
+  .brand-text h1 { font-size: 21px; }
+  .hint { margin: 6px 0 10px; font-size: 13px; }
+  .log { max-height: 120px; }
+}

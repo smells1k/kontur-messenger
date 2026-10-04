@@ -13,6 +13,9 @@
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   const pad = (n) => String(n).padStart(2, '0');
+  /* Телефонный ли макет. matchMedia есть не везде (старые браузеры, тесты) —
+     поэтому проверку заворачиваем в try: без неё страница просто как на ПК. */
+  const phone = () => { try { return !!(window.matchMedia && window.matchMedia('(max-width: 899px)').matches); } catch { return false; } };
   const now = () => Date.now();
 
   function fmtTime(ts) {
@@ -308,6 +311,10 @@
 
   async function openChat(chatId) {
     if (!chatId) return;
+    // телефон: панели — это «шторки» снизу, при переходе в чат их закрываем
+    if (phone() && window.K) {
+      try { K.togglePanel(false); K.toggleEmoji(false); } catch { /* ещё не готово */ }
+    }
     S.activeId = chatId;
     document.body.classList.add('chat-open');
     $('#app').classList.add('chat-open');
@@ -342,7 +349,8 @@
       if (err.status === 404) { toast('Чат недоступен', 'err'); closeChat(); }
       else toast('Не удалось загрузить историю: ' + err.message, 'err');
     }
-    if (window.innerWidth > 760) $('#input').focus();
+    // на телефоне поле не фокусируем: иначе сразу выезжает экранная клавиатура
+    if (!phone()) $('#input').focus();
   }
 
   function closeChat() {
@@ -2339,7 +2347,7 @@
     if (location.hash === '#demo' && !S.token && S.demoMode) $('#btn-demo').click();
   }
 
-  window.K = { S, api, toast, beep, avatarHTML, esc, markup, initials, shade, fmtTime, fmtDay, fmtBytes, fmtDuration, previewText, getChat, getList, renderChats, renderPanel, renderChatHeader, upsertChat, api_: api, uploadFile, openChat, renderMessages, scrollToBottom, loadContextAround, mergeMessages, togglePanel, toggleEmoji, postMessage, fillDeviceList, openSettings, mediaProblem };
+  window.K = { S, api, toast, beep, avatarHTML, esc, markup, initials, shade, fmtTime, fmtDay, fmtBytes, fmtDuration, previewText, getChat, getList, renderChats, renderPanel, renderChatHeader, upsertChat, api_: api, uploadFile, openChat, closeChat, renderMessages, scrollToBottom, loadContextAround, mergeMessages, togglePanel, toggleEmoji, postMessage, fillDeviceList, openSettings, mediaProblem, openModal, closeModal, messageContextMenu };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 })();

@@ -1,0 +1,22 @@
+{
+  "appId": "app.kontur.messenger",
+  "appName": "Контур",
+  "webDir": "www",
+  "loggingBehavior": "debug",
+  "server": {
+    "androidScheme": "http",
+    "allowNavigation": ["127.0.0.1", "localhost", "::1", "*.trycloudflare.com"]
+  },
+  "plugins": {
+    "CapacitorNodeJS": {
+      "nodeDir": "nodejs",
+      "startMode": "manual"
+    }
+  },
+  "android": {
+    "allowMixedContent": true,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": true,
+    "backgroundColor": "#0f1420"
+  }
+}

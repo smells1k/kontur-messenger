@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Контур</string>
+    <string name="title_activity_main">Контур</string>
+    <string name="package_name">app.kontur.messenger</string>
+    <string name="custom_url_scheme">app.kontur.messenger</string>
+</resources>

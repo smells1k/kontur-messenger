@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>Контур — запуск</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0f1420">
+<link rel="stylesheet" href="launcher.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header class="brand">
+    <img src="icon.png" alt="" class="logo">
+    <div class="brand-text">
+      <h1>Контур</h1>
+      <p>мессенджер · сервер в телефоне</p>
+    </div>
+  </header>
+
+  <!-- Сервер на телефоне -->
+  <section class="card" id="card-server">
+    <div class="card-head">
+      <span class="dot" id="server-dot"></span>
+      <b>Сервер на этом телефоне</b>
+    </div>
+    <p class="hint" id="server-hint">Поднимите сервер — и сможете переписываться с телефона и компьютера, а друзья в той же сети Wi‑Fi подключатся по адресу ниже.</p>
+
+    <div class="status" id="server-status" hidden>
+      <div class="addr-row">
+        <span class="addr-label">Адрес для друзей</span>
+        <code id="lan-addr">—</code>
+      </div>
+      <div class="addr-row">
+        <span class="addr-label">На этом телефоне</span>
+        <code id="local-addr">—</code>
+      </div>
+    </div>
+
+    <div class="btns">
+      <button class="btn primary" id="btn-start">▶ Запустить сервер</button>
+      <button class="btn" id="btn-open" hidden>Открыть мессенджер</button>
+      <button class="btn ghost" id="btn-restart" hidden>Перезапустить</button>
+    </div>
+    <div class="btns small">
+      <button class="btn ghost" id="btn-copy" hidden>Скопировать адрес</button>
+      <button class="btn ghost" id="btn-share" hidden>Поделиться</button>
+      <button class="btn ghost" id="btn-keep" hidden>Держать в фоне</button>
+    </div>
+
+    <details class="more">
+      <summary>Как подключить друзей</summary>
+      <ol>
+        <li>Скажите другу адрес из строки «Адрес для друзей» — он откроет его в браузере.</li>
+        <li>Если друг тоже поставил приложение «Контур» на телефон — пусть вставит адрес в блоке «Подключиться к серверу» ниже.</li>
+        <li>Вы должны быть в одной сети Wi‑Fi (или подключитесь через интернет: запустите сервер на компьютере с ключом <code>--tunnel</code>).</li>
+      </ol>
+    </details>
+  </section>
+
+  <!-- Подключение к чужому серверу -->
+  <section class="card" id="card-connect">
+    <div class="card-head"><span class="icon">🔗</span><b>Подключиться к серверу</b></div>
+    <p class="hint">Если сервер запущен на компьютере друга (или у вас дома на ПК), введите адрес — приложение откроет мессенджер к нему.</p>
+    <div class="row">
+      <input id="addr" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="http://192.168.1.10:4000">
+      <button class="btn primary" id="btn-connect">Открыть</button>
+    </div>
+    <div class="recent" id="recent" hidden>
+      <span class="addr-label">Недавние:</span>
+      <div class="chips" id="recent-chips"></div>
+    </div>
+  </section>
+
+  <!-- Журнал запуска -->
+  <section class="card log-card" id="card-log" hidden>
+    <div class="card-head"><span class="icon">📋</span><b>Журнал запуска</b>
+      <button class="btn ghost tiny" id="btn-log-toggle">свернуть</button>
+    </div>
+    <pre class="log" id="log"></pre>
+  </section>
+
+  <footer class="foot">
+    <span id="ver">версия —</span>
+    <span class="sep">·</span>
+    <a href="https://github.com/smells1k/kontur-messenger" id="gh">проект на GitHub</a>
+  </footer>
+
+  <div class="toast" id="toast" hidden></div>
+</div>
+<script src="launcher.js"></script>
+</body>
+</html>

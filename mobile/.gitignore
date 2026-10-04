@@ -1,0 +1,17 @@
+# Зависимости и сборка мобильного приложения.
+# Всё это создаётся заново командами:
+#   npm install → npm run prepare:node → npx cap sync android
+
+node_modules/
+www/nodejs/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+android/app/src/main/assets/public/
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json
+*.apk
+*.aab
+*.log

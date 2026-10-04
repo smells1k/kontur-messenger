@@ -2,11 +2,20 @@
 <html lang="ru" data-theme="dark">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<meta name="theme-color" content="#0f1420">
+<!-- viewport-fit=cover — приложение занимает экран телефона целиком, включая зону «челки» -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#0f1420" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#eef1f7" media="(prefers-color-scheme: light)">
+<meta name="description" content="Мессенджер «Контур»: текст, файлы, звонки и группы. Сервер работает на вашем компьютере или прямо в телефоне.">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Контур">
+<meta name="format-detection" content="telephone=no">
 <title>Мессенджер «Контур»</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
@@ -59,17 +68,20 @@
 <!-- ============================== ПРИЛОЖЕНИЕ ============================== -->
 <div id="app" class="app" hidden>
 
-  <!-- левая колонка: список чатов -->
+  <!-- список чатов: на телефоне — весь экран, на ПК — первая колонка -->
   <aside class="sidebar" id="sidebar">
     <header class="sidebar-head">
       <button class="icon-btn" id="btn-menu" title="Меню">
         <svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
       </button>
-      <div class="search-wrap">
-        <svg class="search-ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-        <input id="search" placeholder="Поиск чатов и людей…" autocomplete="off">
-        <button class="icon-btn tiny" id="btn-search-clear" hidden title="Очистить">✕</button>
+      <div class="side-brand">
+        <img src="/icon-192.png" alt="">
+        <b>Контур</b>
+        <span class="conn-dot" id="conn-dot" title="Связь с сервером"></span>
       </div>
+      <button class="icon-btn only-mobile" id="btn-share-server" title="Поделиться адресом сервера">
+        <svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.6l6.8-4M8.6 13.4l6.8 4"/></svg>
+      </button>
       <button class="icon-btn" id="btn-history" title="История чатов">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
       </button>
@@ -77,6 +89,12 @@
         <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
       </button>
     </header>
+
+    <div class="search-wrap">
+      <svg class="search-ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <input id="search" placeholder="Поиск чатов и людей…" autocomplete="off" enterkeyhint="search">
+      <button class="icon-btn tiny" id="btn-search-clear" hidden title="Очистить">✕</button>
+    </div>
 
     <div class="chat-filter" id="chat-filter">
       <button class="chip active" data-filter="all">Все</button>
@@ -100,7 +118,7 @@
     </footer>
   </aside>
 
-  <!-- центральная колонка: чат -->
+  <!-- чат: на телефоне выезжает поверх списка -->
   <main class="chat" id="chat">
     <div class="empty-state" id="empty-state">
       <svg viewBox="0 0 120 120" width="130" height="130"><rect x="12" y="26" width="96" height="62" rx="18" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="42" cy="57" r="6" fill="currentColor"/><circle cx="60" cy="57" r="6" fill="currentColor"/><circle cx="78" cy="57" r="6" fill="currentColor"/><path d="M30 88 L22 104 L46 88" fill="currentColor"/></svg>
@@ -138,6 +156,7 @@
       </header>
 
       <div class="pin-bar" id="pin-bar" hidden></div>
+
       <div class="search-bar" id="search-bar" hidden>
         <input id="chat-search-input" placeholder="Найти сообщение в чате…">
         <span class="search-count" id="chat-search-count"></span>
@@ -167,7 +186,7 @@
           <button class="icon-btn" id="btn-emoji" title="Эмодзи">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0"/><circle cx="9" cy="10" r="1.2" fill="currentColor"/><circle cx="15" cy="10" r="1.2" fill="currentColor"/></svg>
           </button>
-          <textarea id="input" rows="1" placeholder="Написать сообщение…  (Enter — отправить, Shift+Enter — новая строка)" autocomplete="off"></textarea>
+          <textarea id="input" rows="1" placeholder="Написать сообщение…" autocomplete="off" enterkeyhint="send"></textarea>
           <button class="icon-btn mic" id="btn-voice" title="Голосовое сообщение">
             <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
           </button>
@@ -180,7 +199,7 @@
     </div>
   </main>
 
-  <!-- правая колонка: участники / инфо / эмодзи -->
+  <!-- правая панель: участники / информация (на телефоне — шторка снизу) -->
   <aside class="panel" id="panel" hidden>
     <header class="panel-head">
       <span id="panel-title">Информация</span>
@@ -215,7 +234,7 @@
       <button class="icon-btn tiny" id="btn-history-close" title="Закрыть">✕</button>
     </header>
     <div class="history-search">
-      <input id="history-q" placeholder="Поиск по всей истории: слово или фраза…" autocomplete="off">
+      <input id="history-q" placeholder="Поиск по всей истории: слово или фраза…" autocomplete="off" enterkeyhint="search">
       <select id="history-chat" title="Только один чат"></select>
     </div>
     <div class="history-list" id="history-list"></div>
@@ -241,6 +260,7 @@
   <div class="call-controls">
     <button class="ctl" id="ctl-mic" title="Микрофон"><span>🎙</span></button>
     <button class="ctl" id="ctl-cam" title="Камера"><span>📷</span></button>
+    <button class="ctl only-mobile" id="ctl-flip" title="Сменить камеру (передняя/задняя)"><span>🔄</span></button>
     <button class="ctl" id="ctl-screen" title="Показать экран"><span>🖥</span></button>
     <button class="ctl" id="ctl-effects" title="Сменить фон/эффект"><span>✨</span></button>
     <button class="ctl danger" id="ctl-hangup" title="Завершить"><span>📵</span></button>
@@ -279,5 +299,6 @@
 <script src="/js/emoji-data.js"></script>
 <script src="/js/app.js"></script>
 <script src="/js/call.js"></script>
+<script src="/js/ui.js"></script>
 </body>
 </html>

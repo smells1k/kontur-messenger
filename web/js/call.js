@@ -23,10 +23,14 @@
     { urls: 'stun:stun.cloudflare.com:3478' },
   ];
 
+  /** Телефонный макет? От этого зависит набор кнопок и выбор камеры. */
+  const phone = () => { try { return !!(window.matchMedia && window.matchMedia('(max-width: 899px)').matches); } catch { return false; } };
+
   const C = {
     call: null,
     localStream: null,
     camTrack: null,
+    facing: 'user',      // передняя камера; на телефоне переключается кнопкой 🔄
     micTrack: null,
     screenStream: null,
     peers: new Map(),      // userId -> entry
@@ -170,7 +174,7 @@
     );
     const video = kind === 'video'
       ? Object.assign({ width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
-          d.videoIn ? { deviceId: { exact: d.videoIn } } : {})
+          d.videoIn ? { deviceId: { exact: d.videoIn } } : { facingMode: { ideal: C.facing } })
       : false;
     return { audio, video };
   }
@@ -692,6 +696,7 @@
     }
     $('#ctl-cam').classList.toggle('off', !C.camOn);
     $('#ctl-mic').classList.toggle('off', C.muted);
+    $('#ctl-flip').style.display = C.camTrack ? '' : 'none';
     startSelfProbe();
     renderTiles();
     ws({ type: 'call:state', payload: { callId: call.id, state: { muted: C.muted, camera: C.camOn } } });
@@ -758,6 +763,36 @@
     $('#ctl-cam').classList.toggle('off', !C.camOn);
     ws({ type: 'call:state', payload: { callId: C.call.id, state: { camera: C.camOn } } });
     renderTiles();
+  }
+
+  /**
+   * Смена камеры на телефоне: передняя ⟷ задняя.
+   * Берём новую дорожку и подменяем её у всех собеседников — звонок не прерывается.
+   */
+  async function flipCamera() {
+    if (!phone()) return;
+    if (!C.localStream || !C.camTrack) { toast('Камера недоступна', 'err'); return; }
+    C.facing = C.facing === 'user' ? 'environment' : 'user';
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { facingMode: { ideal: C.facing }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+      });
+      const fresh = stream.getVideoTracks()[0];
+      const old = C.camTrack;
+      C.camTrack = fresh;
+      fresh.enabled = C.camOn;
+      C.localStream.removeTrack(old);
+      C.localStream.addTrack(fresh);
+      old.stop();
+      await setVideoOnPeers(fresh, C.localStream);
+      if (C.effect && C.effect !== 'none') applyEffect(C.effect);   // эффект накладываем заново
+      renderTiles();
+      toast(C.facing === 'user' ? 'Передняя камера' : 'Задняя камера');
+    } catch (err) {
+      C.facing = C.facing === 'user' ? 'environment' : 'user';       // откатываем выбор
+      toast('Не удалось сменить камеру: ' + err.message, 'err', 6000);
+    }
   }
 
   async function setVideoOnPeers(track, stream) {
@@ -957,7 +992,10 @@
     $('#btn-decline').addEventListener('click', decline);
     $('#ctl-mic').addEventListener('click', toggleMic);
     $('#ctl-cam').addEventListener('click', toggleCam);
+    $('#ctl-flip')?.addEventListener('click', flipCamera);
     $('#ctl-screen').addEventListener('click', toggleScreen);
+    // телефон: показ экрана в WebView недоступен, кнопку не показываем
+    if (phone()) $('#ctl-screen').style.display = 'none';
     $('#ctl-effects').addEventListener('click', cycleEffect);
     $('#ctl-hangup').addEventListener('click', hangup);
     $('#btn-call-minimize').addEventListener('click', minimize);
