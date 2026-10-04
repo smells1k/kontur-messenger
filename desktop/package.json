@@ -1,7 +1,7 @@
 {
   "name": "kontur-desktop",
   "productName": "Kontur",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Десктопный клиент мессенджера «Контур» (Electron): синхронизация, группы, файлы, звонки WebRTC",
   "main": "main.js",
   "author": "Kontur",

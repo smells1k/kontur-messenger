@@ -306,8 +306,14 @@ app.use((req, res, next) => {
 
 /* -------------------------------------------------------------------- запуск */
 
-server.listen(config.port, config.host, () => {
+/** Колбэк запуска: сообщаем лаунчеру «готово» и печатаем баннер. */
+function onListening() {
   const addresses = localIPv4();
+  // Лаунчер (тот же процесс) ждёт этот сигнал — раньше он проверял себя по сети
+  // и на Windows мог не дождаться (VPN, файрвол, IPv6), из-за чего окно не открывалось.
+  if (typeof global.__konturServerReady === 'function') {
+    try { global.__konturServerReady({ port: config.port, addresses: addresses.map((a) => a.address) }); } catch {}
+  }
   if (!config.quiet) {
     const scheme = config.https ? 'https' : 'http';
     const wsScheme = config.https ? 'wss' : 'ws';
@@ -316,7 +322,7 @@ server.listen(config.port, config.host, () => {
     console.log('  | ' + String(config.serverName).replace(/[«»]/g, '').trim().padEnd(50).slice(0, 50) + '|');
     console.log('  +' + '-'.repeat(53) + '+');
     console.log(` Версия:      ${config.version}${config.buildDate ? ' (сборка ' + config.buildDate + ')' : ''}  -  Node ${process.version}`);
-    console.log(` Локально:    ${scheme}://localhost:${config.port}`);
+    console.log(` Локально:    ${scheme}://127.0.0.1:${config.port}   (этот адрес открывает окно мессенджера)`);
     const real = publicIPv4(addresses);
     for (const a of real) {
       console.log(` В сети:      ${scheme}://${a.address}:${config.port}   <- ${a.name} - этот адрес давайте друзьям`);
@@ -359,15 +365,54 @@ server.listen(config.port, config.host, () => {
     const cmd = process.platform === 'win32' ? `start "" "${url}"` : process.platform === 'darwin' ? `open "${url}"` : `xdg-open "${url}"`;
     require('child_process').exec(cmd, () => {});
   }
-});
+}
+
+/**
+ * Слушаем «0.0.0.0» двойным стеком (::): тогда работают и 127.0.0.1, и ::1.
+ * На Windows браузеры часто ходят на localhost через IPv6 — из-за IPv4-only
+ * привязки проверка «сервер не отвечает» срабатывала даже у живого сервера.
+ */
+let listenFallback = false;
+function listenNow() {
+  if (!config.host || config.host === '0.0.0.0') {
+    server.listen(config.port, '::', onListening);
+  } else {
+    server.listen(config.port, config.host, onListening);
+  }
+}
 
 server.on('error', (err) => {
-  if (err.code === 'EADDRINUSE') {
-    console.error(`\n[x] Порт ${config.port} занят. Запусти с другим портом:  node server.js --port ${config.port + 1}\n`);
-    process.exit(1);
+  // IPv6 может быть выключен в системе — тогда спокойно переходим на IPv4
+  if (!listenFallback && (!config.host || config.host === '0.0.0.0') &&
+      ['EAFNOSUPPORT', 'EADDRNOTAVAIL', 'EINVAL', 'EPROTONOSUPPORT'].includes(err.code)) {
+    listenFallback = true;
+    console.log('   [i] IPv6 в системе недоступен - слушаю только IPv4.');
+    server.listen(config.port, '0.0.0.0', onListening);
+    return;
   }
-  throw err;
+  if (err.code === 'EADDRINUSE') {
+    console.error('');
+    console.error(`[x] Порт ${config.port} уже занят: похоже, запущен старый KonturServer (или другая программа).`);
+    console.error(`   Кто держит порт:      netstat -ano | findstr :${config.port}`);
+    console.error(`   Запустить на другом:  KonturServer.exe --port ${config.port + 1}`);
+    console.error('   Лаунчер KonturServer.exe делает это сам: закрывает старый экземпляр или берёт свободный порт.');
+    console.error('');
+    process.exitCode = 1;
+    return;
+  }
+  if (err.code === 'EACCES') {
+    console.error('');
+    console.error(`[x] Windows не даёт занять порт ${config.port} (порт в запрещённом диапазоне Hyper-V/WSL).`);
+    console.error('   Посмотреть запрещённые диапазоны:  netsh int ipv4 show excludedportrange protocol=tcp');
+    console.error(`   Проще всего взять другой порт:      KonturServer.exe --port ${config.port + 1}`);
+    console.error('');
+    process.exitCode = 1;
+    return;
+  }
+  console.error('[server] ошибка сервера:', err.message);
 });
+
+listenNow();
 
 let closing = false;
 function shutdown() {

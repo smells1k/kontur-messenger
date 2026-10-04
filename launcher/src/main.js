@@ -14,7 +14,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const http = require('http');
-const { spawn, exec } = require('child_process');
+const net = require('net');
+const { spawn, exec, execSync } = require('child_process');
 
 const IS_PKG = !!process.pkg;
 const EXE_DIR = IS_PKG ? path.dirname(process.execPath) : path.resolve(__dirname, '..');
@@ -38,7 +39,7 @@ const SERVER_URL = (() => {
   if (!/^https?:\/\//i.test(url)) url = 'http://' + url;
   return url.replace(/\/+$/, '');
 })();
-const PORT = Number(arg('port', process.env.PORT || 4000));
+let PORT = Number(arg('port', process.env.PORT || 4000));
 const HOST = String(arg('host', process.env.HOST || '0.0.0.0'));
 const OPEN_APP = !has('no-open');
 const APP_MODE = !has('browser');
@@ -57,7 +58,8 @@ if (has('help') || has('h')) {
 
   Kontur.exe [параметры]
 
-  --port N        порт (по умолчанию 4000)
+  --port N        порт (по умолчанию 4000). Если порт занят, лаунчер сам закроет
+                  старый экземпляр мессенджера или возьмёт свободный порт рядом
   --host IP       адрес прослушивания (по умолчанию 0.0.0.0 — доступно в локальной сети)
   --data DIR      где хранить базу сообщений и загруженные файлы
   --no-open       не открывать окно клиента автоматически
@@ -182,15 +184,159 @@ function startServer() {
 const USE_HTTPS = has('https') || process.env.HTTPS === '1';
 /** Локальный адрес намеренно на 127.0.0.1: «localhost» на Windows резолвится в IPv6 ::1,
  *  а сервер слушает IPv4 — из-за этого проверка «сервер не отвечает» и окно не открывалось. */
-const LOCAL_BASE = `${USE_HTTPS ? 'https' : 'http'}://127.0.0.1:${PORT}`;
+const localBase = () => `${USE_HTTPS ? 'https' : 'http'}://127.0.0.1:${PORT}`;
 
-function healthCheck(url = `${LOCAL_BASE}/health`) {
+/** Все адреса, по которым этот же компьютер может достучаться до своего сервера. */
+function localCandidates() {
+  const scheme = USE_HTTPS ? 'https' : 'http';
+  const urls = [`${scheme}://127.0.0.1:${PORT}/health`, `${scheme}://[::1]:${PORT}/health`];
+  try {
+    for (const list of Object.values(os.networkInterfaces())) {
+      for (const a of list || []) {
+        if (a && a.family === 'IPv4' && !a.internal && !/^169\.254\./.test(a.address)) urls.push(`${scheme}://${a.address}:${PORT}/health`);
+      }
+    }
+  } catch { /* без сети — обойдёмся петлёй */ }
+  return urls;
+}
+
+/** Ждём ответа сервера по любому из локальных адресов (а не только 127.0.0.1). */
+async function waitForServerAny(timeoutMs = 12000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    for (const url of localCandidates()) if (await healthCheck(url)) return url;
+    await sleep(400);
+  }
+  return false;
+}
+
+function healthCheck(url = `${localBase()}/health`) {
   return new Promise((resolve) => {
     const lib = url.startsWith('https') ? require('https') : http;
     const req = lib.get(url, { timeout: 1500, rejectUnauthorized: false }, (res) => { res.resume(); resolve(res.statusCode === 200); });
     req.on('error', () => resolve(false));
     req.on('timeout', () => { req.destroy(); resolve(false); });
   });
+}
+
+/* ------------------------------------------------------- проверка порта и запуск */
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Что находится на порту: свободно / наш мессенджер / чужая программа.
+ * Раньше лаунчер просто ждал ответа от 127.0.0.1 и, если что-то мешало
+ * (старый экземпляр, VPN вроде Cloudflare WARP, запрет порта Windows),
+ * писал «сервер не отвечает» и не открывал окно.
+ */
+function probePort(port, host = '127.0.0.1') {
+  return new Promise((resolve) => {
+    const sock = net.connect({ port, host });
+    let settled = false;
+    const finish = (state, extra) => {
+      if (settled) return;
+      settled = true;
+      try { sock.destroy(); } catch {}
+      resolve(Object.assign({ state }, extra || {}));
+    };
+    const timer = setTimeout(() => finish('foreign', { why: 'нет ответа' }), 1500);
+    sock.on('error', (err) => {
+      clearTimeout(timer);
+      finish(err.code === 'ECONNREFUSED' ? 'free' : 'foreign', { why: err.code });
+    });
+    sock.on('connect', () => {
+      clearTimeout(timer);
+      const req = http.get({ host, port, path: '/health', timeout: 2000 }, (res) => {
+        let body = '';
+        res.on('data', (c) => { body += c; });
+        res.on('end', () => {
+          try {
+            const j = JSON.parse(body);
+            finish(j && j.ok ? 'ours' : 'foreign', { version: j && j.version, name: j && j.name, data: j && j.data });
+          } catch { finish('foreign'); }
+        });
+      });
+      req.on('error', () => finish('foreign'));
+      req.on('timeout', () => { req.destroy(); finish('foreign', { why: 'таймаут' }); });
+    });
+  });
+}
+
+/** Первый свободный порт, начиная с заданного (4001, 4002, …). */
+async function freePortFrom(start, tries = 30) {
+  for (let p = start; p < start + tries; p++) {
+    const st = await probePort(p);
+    if (st.state === 'free') return p;
+  }
+  return null;
+}
+
+/** PID процесса, слушающего порт (Windows: netstat -ano). */
+function pidOnPort(port) {
+  try {
+    const out = execSync('netstat -ano -p tcp', { encoding: 'utf8', timeout: 5000 });
+    const re = new RegExp('[:.]' + port + '\\s+\\S+\\s+LISTENING\\s+(\\d+)', 'i');
+    const m = out.match(re);
+    return m ? Number(m[1]) : null;
+  } catch { return null; }
+}
+
+/** Закрываем ТОЛЬКО старый KonturServer.exe — чужой процесс не трогаем. */
+function killOldInstance(pid) {
+  try {
+    if (!pid || pid === process.pid) return false;
+    const info = execSync(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`, { encoding: 'utf8', timeout: 5000 });
+    if (!/KonturServer\.exe|Kontur\.exe/i.test(info)) return false;
+    execSync(`taskkill /PID ${pid} /F`, { stdio: 'ignore', timeout: 5000 });
+    return true;
+  } catch { return false; }
+}
+
+/**
+ * Готовим порт до запуска сервера:
+ *  • свободен — работаем как обычно;
+ *  • занят старым мессенджером — закрываем его (только Windows) либо берём другой порт;
+ *  • занят чужой программой — берём свободный порт и объясняем почему.
+ */
+async function preparePort() {
+  const state = await probePort(PORT);
+  if (state.state === 'free') return { mode: 'start' };
+
+  if (state.state === 'ours') {
+    if (!QUIET) {
+      console.log('');
+      console.log(`[launcher] На порту ${PORT} уже работает мессенджер${state.version ? ' v' + state.version : ''}.`);
+    }
+    if (IS_WINDOWS) {
+      const pid = pidOnPort(PORT);
+      if (killOldInstance(pid)) {
+        if (!QUIET) console.log(`   Закрыл старый экземпляр (PID ${pid}) — поднимаю новый сервер.`);
+        await sleep(800);
+        if ((await probePort(PORT)).state === 'free') return { mode: 'start' };
+      } else if (!QUIET) {
+        console.log('   Закрыть его не удалось (закройте окно старого сервера вручную: Ctrl+C).');
+      }
+    } else if (!QUIET) {
+      console.log('   Использую его - своё окно открою к тому же серверу.');
+    }
+    // Старый сервер жив и работает: не плодим второй, просто откроем окно к нему.
+    if (!IS_WINDOWS) return { mode: 'reuse' };
+  } else if (!QUIET) {
+    console.log('');
+    console.log(`[launcher] Порт ${PORT} занят другой программой (${state.why || 'не отвечает'}).`);
+  }
+
+  const alt = await freePortFrom(PORT + 1);
+  if (!alt) {
+    console.error(`[x] Не нашёл свободный порт рядом с ${PORT}. Запустите с другим портом: --port 4300`);
+    process.exit(1);
+  }
+  if (!QUIET) {
+    console.log(`   Поднимаю мессенджер на свободном порту ${alt}.`);
+    console.log(`   Чтобы вернуться на ${PORT}, закройте занимающую его программу и запустите снова.`);
+  }
+  PORT = alt;
+  return { mode: 'start' };
 }
 
 function findChromium() {
@@ -236,12 +382,29 @@ function permissionsArgs(url) {
 }
 
 async function openClient(url = null) {
-  const target = url || `${USE_HTTPS ? 'https' : 'http'}://localhost:${PORT}`;
-  const checkUrl = url ? url.replace(/\/$/, '') + '/health' : `${LOCAL_BASE}/health`;
-  if (!(await waitForServer(checkUrl, 25000))) {
-    console.error(`[x] Сервер не отвечает по адресу ${checkUrl} - окно не открываю.`);
-    console.error('   Проверьте, не занят ли порт другой программой, и запустите ещё раз.');
-    return;
+  const target = url || localBase();
+  let alive = false;
+  if (url) {
+    alive = await waitForServer(url.replace(/\/$/, '') + '/health', 12000);
+    if (!alive) {
+      console.log('   [!] Сервер друга пока не отвечает. Проверьте:');
+      console.log('      * адрес указан верно (например, http://192.168.1.10:4000);');
+      console.log('      * вы в одной сети с тем, кто запустил сервер;');
+      console.log('      * на его компьютере разрешён мессенджер в брандмауэре.');
+      console.log('   Всё равно открываю окно - клиент сам переподключится.');
+    }
+  } else {
+    alive = await waitForServer(`${localBase()}/health`, 15000) || await waitForServerAny(10000);
+    if (!alive) {
+      // Раньше здесь лаунчер отказывался открывать окно. Теперь окно открывается всегда:
+      // сервер работает в этом же процессе, а проверка по сети может не пройти из-за
+      // VPN (Cloudflare WARP), антивируса, IPv6 или запрещённого порта Windows.
+      console.log(`   [!] Не дождался ответа по адресу ${localBase()}/health, но окно открываю.`);
+      console.log('      Если в окне пусто, проверьте:');
+      console.log(`        * порт не занят другой программой:  netstat -ano | findstr :${PORT}`);
+      console.log('        * VPN/антивирус (например, Cloudflare WARP) и брандмауэр Windows: разрешите мессенджеру локальные соединения;');
+      console.log(`        * другой порт:  KonturServer.exe --port ${PORT + 1}`);
+    }
   }
   const browser = APP_MODE ? findChromium() : null;
   if (browser) {
@@ -253,6 +416,7 @@ async function openClient(url = null) {
     const child = spawn(browser, args, { detached: true, stdio: 'ignore' });
     child.unref();
     if (IS_WINDOWS) console.log(` Окно приложения открыто (${path.basename(browser)}). Работает как обычное приложение.`);
+    if (!url) console.log(`   Адрес окна: ${target}  ·  мессенджер слушает порт ${PORT}`);
     if (permissionsArgs(target).length) {
       console.log('   Камера, микрофон и демонстрация экрана разрешены в этом окне даже по http.');
     }
@@ -366,13 +530,21 @@ function printTunnelHelp(reason) {
     return;
   }
 
-  const already = await healthCheck();
-  if (already) {
-    if (!QUIET) console.log(`\n[launcher] Сервер уже запущен на порту ${PORT} - открываю клиент.`);
+  // Порт: пустой — работаем; занят старым мессенджером — закрываем его (Windows) или
+  // переиспользуем; занят чужой программой — берём свободный и объясняем это в консоли.
+  const prep = await preparePort();
+  if (prep.mode === 'reuse') {
+    if (!QUIET) console.log(`\n[launcher] Сервер уже запущен на порту ${PORT} - открываю окно.`);
     if (OPEN_APP) await openClient();
     if (USE_TUNNEL) startTunnel();
     return;
   }
+
+  // Сигнал «сервер поднялся» приходит напрямую из сервера (тот же процесс) —
+  // так окно открывается даже там, где проверка по сети врёт.
+  let readyResolve = null;
+  const serverReady = new Promise((resolve) => { readyResolve = resolve; });
+  global.__konturServerReady = (info) => { if (readyResolve) readyResolve(info); };
 
   startServer();
 
@@ -387,11 +559,11 @@ function printTunnelHelp(reason) {
   });
 
   if (OPEN_APP) {
-    setTimeout(async () => {
-      const up = await waitForServer();
-      if (up) await openClient();
-      else console.error('[x] Сервер не отвечает.');
-    }, 300);
+    (async () => {
+      const info = await Promise.race([serverReady, sleep(9000).then(() => null)]);
+      if (!info) console.log('[launcher] Сервер поднимается дольше обычного - открываю окно и продолжаю ждать.');
+      await openClient();
+    })();
   }
 
   if (USE_TUNNEL && !SERVER_URL) setTimeout(startTunnel, 800);
