@@ -104,10 +104,22 @@ jobs:
           distribution: temurin
           java-version: '21'                       # нужно Gradle 8.14 и AGP 8.13
 
-      - uses: android-actions/setup-android@v3
-
       - name: Компоненты Android SDK (compileSdk 36)
-        run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+        run: |
+          # На образах GitHub Android SDK уже стоит; ставим только нужные версии.
+          # (готовое действие setup-android тянет устаревший пакет «tools» и падает)
+          for candidate in \
+              "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+              "$ANDROID_HOME/cmdline-tools/16.0/bin/sdkmanager" \
+              "$(command -v sdkmanager || true)"; do
+            if [ -x "$candidate" ]; then SDKMANAGER="$candidate"; break; fi
+          done
+          echo "sdkmanager: $SDKMANAGER"
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls "$ANDROID_HOME/platforms"
 
       - uses: gradle/actions/setup-gradle@v4
 
