@@ -33,7 +33,9 @@ function saveConfig() {
 /* ------------------------------------------------------------------ проверки */
 function health(url) {
   return new Promise((resolve) => {
-    const req = http.get(url.replace(/\/$/, '') + '/health', { timeout: 1500 }, (res) => { res.resume(); resolve(res.statusCode === 200); });
+    const lib = url.startsWith('https') ? require('https') : http;
+    const req = lib.get(url.replace(/\/$/, '') + '/health', { timeout: 1800, rejectUnauthorized: false },
+      (res) => { res.resume(); resolve(res.statusCode === 200); });
     req.on('error', () => resolve(false));
     req.on('timeout', () => { req.destroy(); resolve(false); });
   });

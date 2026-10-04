@@ -48,6 +48,7 @@ if (has('help') || has('h')) {
   --data DIR      где хранить базу сообщений и загруженные файлы
   --no-open       не открывать окно клиента автоматически
   --browser       открыть в обычном браузере, а не в режиме приложения
+  --https         включить HTTPS (нужно для звонков с телефонов и других ПК)
   --no-demo       выключить демо-режим (бот и демо-аккаунты)
   --closed        закрыть регистрацию новых пользователей
   --quiet         меньше вывода в консоль
@@ -127,6 +128,7 @@ function startServer() {
 
   process.argv = [process.argv[0], serverEntry, '--port', String(PORT), '--host', HOST, '--data', DATA_DIR, '--web', webDir]
     .concat(QUIET ? ['--quiet'] : [])
+    .concat(USE_HTTPS ? ['--https'] : [])
     .concat(has('no-demo') ? ['--no-demo'] : [])
     .concat(has('closed') ? ['--closed'] : []);
   process.env.KONTUR_LAUNCHER = '1';
@@ -147,9 +149,12 @@ function startServer() {
 }
 
 /* -------------------------------------------------------------------- клиент */
-function healthCheck(url = `http://127.0.0.1:${PORT}/health`) {
+const USE_HTTPS = has('https') || process.env.HTTPS === '1';
+
+function healthCheck(url = `${USE_HTTPS ? 'https' : 'http'}://127.0.0.1:${PORT}/health`) {
   return new Promise((resolve) => {
-    const req = http.get(url, { timeout: 1200 }, (res) => { res.resume(); resolve(res.statusCode === 200); });
+    const lib = url.startsWith('https') ? require('https') : http;
+    const req = lib.get(url, { timeout: 1500, rejectUnauthorized: false }, (res) => { res.resume(); resolve(res.statusCode === 200); });
     req.on('error', () => resolve(false));
     req.on('timeout', () => { req.destroy(); resolve(false); });
   });
@@ -183,7 +188,7 @@ async function waitForServer(timeoutMs = 20000) {
 }
 
 async function openClient() {
-  const url = `http://localhost:${PORT}`;
+  const url = `${USE_HTTPS ? 'https' : 'http'}://localhost:${PORT}`;
   if (!(await waitForServer())) { console.error('❌ Сервер не поднялся, окно не открываю.'); return; }
   const browser = APP_MODE ? findChromium() : null;
   if (browser) {

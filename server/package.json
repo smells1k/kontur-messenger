@@ -1,6 +1,6 @@
 {
   "name": "server",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "main": "index.js",
   "scripts": {
     "start": "node server.js",
@@ -17,6 +17,7 @@
     "ws": "^8.22.0"
   },
   "devDependencies": {
+    "@roamhq/wrtc": "^0.10.0",
     "emoji-datasource": "^16.0.0",
     "jsdom": "^29.1.1"
   }

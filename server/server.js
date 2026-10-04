@@ -70,7 +70,51 @@ const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '2mb' }));
 
-const server = http.createServer(app);
+/* ------------------------------------------------------- HTTPS (для звонков) */
+
+function localIPv4() {
+  const out = [];
+  for (const list of Object.values(os.networkInterfaces())) {
+    for (const iface of list || []) if (iface.family === 'IPv4' && !iface.internal) out.push(iface.address);
+  }
+  return out;
+}
+
+/**
+ * Браузеры разрешают камеру/микрофон только на localhost или по HTTPS.
+ * Поэтому для звонков с других устройств в сети есть режим --https:
+ * при первом запуске сам подписывает сертификат (нужен openssl) под IP этого компьютера.
+ */
+function ensureCerts(cfg) {
+  const keyPath = String(flag('key', process.env.TLS_KEY || path.join(cfg.dataDir, 'certs', 'key.pem')));
+  const certPath = String(flag('cert', process.env.TLS_CERT || path.join(cfg.dataDir, 'certs', 'cert.pem')));
+  try {
+    if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
+      return { key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath), keyPath, certPath };
+    }
+  } catch {}
+  const san = ['DNS:localhost', 'IP:127.0.0.1', ...localIPv4().map((ip) => 'IP:' + ip)].join(',');
+  try {
+    fs.mkdirSync(path.dirname(keyPath), { recursive: true });
+    fs.mkdirSync(path.dirname(certPath), { recursive: true });
+    require('child_process').execSync(
+      `openssl req -x509 -newkey rsa:2048 -nodes -days 3650 ` +
+      `-keyout "${keyPath}" -out "${certPath}" -subj "/CN=kontur-messenger" -addext "subjectAltName=${san}"`,
+      { stdio: 'ignore' }
+    );
+    return { key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath), keyPath, certPath };
+  } catch (err) {
+    console.warn('⚠️  HTTPS: не удалось создать сертификат (openssl):', err.message);
+    return null;
+  }
+}
+
+const wantHttps = argv.includes('--https') || process.env.HTTPS === '1';
+const tls = wantHttps ? ensureCerts(config) : null;
+config.https = !!tls;
+if (wantHttps && !tls) console.warn('⚠️  Продолжаю по http — звонки с других устройств браузер может заблокировать.');
+
+const server = tls ? require('https').createServer(tls, app) : http.createServer(app);
 const hub = new Hub({ server, store, core, secret, path: '/ws' });
 core.hub = hub;
 core.hubStore = store;
@@ -109,21 +153,26 @@ app.use((req, res, next) => {
 /* -------------------------------------------------------------------- запуск */
 
 server.listen(config.port, config.host, () => {
-  const addresses = [];
-  for (const list of Object.values(os.networkInterfaces())) {
-    for (const iface of list || []) {
-      if (iface.family === 'IPv4' && !iface.internal) addresses.push(iface.address);
-    }
-  }
+  const addresses = localIPv4();
   if (!config.quiet) {
+    const scheme = config.https ? 'https' : 'http';
+    const wsScheme = config.https ? 'wss' : 'ws';
     console.log('');
     console.log('  ┌─────────────────────────────────────────────────────┐');
     console.log('  │  💬  ' + config.serverName.padEnd(44) + ' │');
     console.log('  └─────────────────────────────────────────────────────┘');
     console.log(`   Версия:      ${config.version}  (Node ${process.version})`);
-    console.log(`   Локально:    http://localhost:${config.port}`);
-    for (const ip of addresses) console.log(`   В сети:      http://${ip}:${config.port}   ← открой у друзей в той же сети`);
-    console.log(`   WebSocket:   ws://localhost:${config.port}/ws`);
+    console.log(`   Локально:    ${scheme}://localhost:${config.port}`);
+    for (const ip of addresses) console.log(`   В сети:      ${scheme}://${ip}:${config.port}   ← открой у друзей в той же сети`);
+    console.log(`   WebSocket:   ${wsScheme}://localhost:${config.port}/ws`);
+    if (config.https) {
+      console.log('   🔒 HTTPS включён: сертификат самоподписанный → браузер один раз спросит');
+      console.log('      «Подробнее → Перейти на сайт». Зато камера, микрофон и звонки');
+      console.log('      работают на всех устройствах в сети.');
+    } else {
+      console.log('   ℹ️  Голос/видео из браузера доступны только на этом компьютере (localhost).');
+      console.log('      Чтобы звонить с телефона/другого ПК, запусти с флагом --https.');
+    }
     console.log(`   Данные:      ${config.dataDir}`);
     if (seeded && !seeded.skipped) {
       console.log('');

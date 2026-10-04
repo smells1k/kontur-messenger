@@ -163,11 +163,37 @@ async function rest(path, { method = 'GET', body, token } = {}) {
   const reacted = await waitFor(() => $$('#messages-inner .reaction').find((r) => r.textContent.includes('🔥')), 'реакция');
   ok(!!reacted, 'реакция появилась и синхронизировалась');
 
+  console.log('\n— Клик по цитате ответа не должен дублировать сообщения —');
+  const beforeJump = window.K.getList(group.id).length;
+  const quoted = window.K.getList(group.id)[0];
+  // отвечаем на первое сообщение, затем «прыгаем» по цитате несколько раз
+  const replyId = window.K.postMessage(group.id, 'Ответ на первое сообщение', [], { replyTo: quoted.id });
+  await sleep(600);
+  window.K.openChat(group.id);
+  await waitFor(() => $$('#messages-inner .msg').length > 0, 'лента после ответа');
+  const quoteEl = $('#messages-inner .reply-quote');
+  ok(!!quoteEl, 'цитата ответа отрисована');
+  for (let i = 0; i < 3; i++) {
+    window.K.loadContextAround(quoted.id);
+    await sleep(350);
+  }
+  const afterJump = window.K.getList(group.id).length;
+  ok(afterJump === beforeJump + 1, 'сообщения не дублируются после переходов по цитате', `${beforeJump} → ${afterJump}`);
+  const ids = window.K.getList(group.id).map((m) => m.id);
+  ok(new Set(ids).size === ids.length, 'в ленте нет повторов id');
+  ok(!!replyId, 'сообщение-ответ отправлено');
+
   console.log('\n— Эмодзи-панель —');
   $('#btn-emoji').click();
   await sleep(300);
   const cells = $$('#emoji-grid .emoji-cell').length;
-  ok(cells > 1500, 'панель эмодзи отрисована', cells + ' эмодзи');
+  ok(cells > 900, 'панель эмодзи отрисована', cells + ' эмодзи');
+  // в наборе не должно быть «квадратиков»: ни ZWJ-составных, ни тонов кожи, ни флагов
+  const allEmoji = window.EMOJI_CATEGORIES.flatMap((c) => c.items.map((i) => i.e));
+  const bad = allEmoji.filter((e) => /\u200D/.test(e) || /[\u{1F3FB}-\u{1F3FF}]/u.test(e) || /[\u{1F1E6}-\u{1F1FF}]{2}/u.test(e) || /\u20E3/.test(e) || [...e].length > 2);
+  ok(bad.length === 0, 'в наборе нет составных/неподдерживаемых эмодзи (квадратиков)', bad.slice(0, 3).join(' ') || 'чисто');
+  ok(window.EMOJI_CATEGORIES.every((c) => /[А-Яа-я]/.test(c.name)), 'категории подписаны по-русски',
+    window.EMOJI_CATEGORIES.map((c) => c.name).slice(0, 3).join(', '));
   const q = $('#emoji-q');
   q.value = 'heart';
   q.dispatchEvent(new window.Event('input', { bubbles: true }));
@@ -187,6 +213,7 @@ async function rest(path, { method = 'GET', body, token } = {}) {
   ok(!$('#panel').hidden && $$('#panel-body .member-row').length === 2, 'панель участников: только мои двое',
     $$('#panel-body .member-row').length + ' участников');
   ok($$('#panel-body .emoji-av-row button').length >= 8, 'смена аватара группы доступна');
+  ok(!!$('#group-av-upload'), 'можно загрузить своё фото группы');
   $('#btn-panel-close').click();
 
   console.log('\n— Поиск и фильтры —');
@@ -201,10 +228,24 @@ async function rest(path, { method = 'GET', body, token } = {}) {
   ok($$('#chat-list .chat-item').length === 1, 'фильтр «Группы» показывает ровно группу');
   window.document.querySelector('#chat-filter .chip[data-filter="all"]').click();
 
+  console.log('\n— Панели не мешают друг другу —');
+  window.K.toggleEmoji(true);
+  await sleep(150);
+  ok(!$('#emoji-panel').hidden && $('#panel').hidden, 'открыта только панель эмодзи');
+  window.K.togglePanel(true);
+  await sleep(150);
+  ok($('#emoji-panel').hidden && !$('#panel').hidden, 'при открытии участников эмодзи закрылись (интерфейс не съезжает)');
+  ok(window.document.querySelector('#app').classList.contains('with-panel'), 'класс with-panel выставлен верно');
+  $('#btn-panel-close').click();
+
   console.log('\n— Настройки и тема —');
   $('#btn-profile').click();
   await sleep(400);
   ok(!$('#modal').hidden && $('#modal-box').textContent.includes('Настройки'), 'окно настроек открылось');
+  ok(!!$('#d-mic') && !!$('#d-cam') && !!$('#d-out'), 'в настройках есть выбор микрофона, камеры и динамиков');
+  ok(!!$('#d-test'), 'есть кнопка проверки микрофона');
+  ok(!!$('#s-avatar-preview'), 'в профиле можно загрузить свой аватар');
+  ok(!!$('#s-clear'), 'есть кнопка очистки локальных данных');
   const theme = $('#s-theme');
   theme.checked = false;
   theme.dispatchEvent(new window.Event('click', { bubbles: true }));

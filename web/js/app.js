@@ -90,7 +90,7 @@
     const bg = url ? '' : `background:linear-gradient(135deg, ${user.color || '#6c8cff'}, ${shade(user.color || '#6c8cff', -28)})`;
     const inner = url ? `<img src="${esc(url)}" alt="">` : (emojiAv ? `<span>${esc(emojiAv)}</span>` : esc(initials(user.displayName || user.username)));
     const status = withStatus && !user.isBot ? `<span class="status-dot ${user.online ? 'online' : ''}"></span>` : '';
-    return `<div class="${cls} ${emojiAv ? 'emoji-av' : ''}"${idAttr} style="${bg}" title="${esc(user.displayName || '')}">${inner}${status}</div>`;
+    return `<div class="${cls} ${emojiAv ? 'emoji-av' : ''}"${idAttr} style="${bg}" title="${esc(user.displayName || '')}"><span class="av-inner">${inner}</span>${status}</div>`;
   }
   function shade(hex, percent) {
     const m = /^#([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || '');
@@ -327,7 +327,7 @@
     try {
       const data = await api(`/chats/${chatId}/messages?limit=60`);
       upsertChat(data.chat);
-      lists().set(chatId, data.messages.map(normalize));
+      mergeMessages(chatId, data.messages);
       S.hasMore = S.hasMore || {};
       S.hasMore[chatId] = data.hasMore;
       renderMessages(true);
@@ -367,6 +367,24 @@
 
   /* ---------------------------------------------------------------- сообщения */
   function getList(chatId) { return lists().get(chatId) || []; }
+
+  /**
+   * Добавляет сообщения в список чата, склеивая по id.
+   * Именно тут раньше появлялись дубли: при клике на цитату ответа
+   * история догружалась и приклеивалась заново.
+   */
+  function mergeMessages(chatId, incoming) {
+    const map = new Map();
+    for (const m of getList(chatId)) map.set(m.id, m);
+    for (const raw of incoming || []) {
+      const m = normalize(raw);
+      const existing = map.get(m.id);
+      map.set(m.id, existing ? Object.assign(existing, m) : m);
+    }
+    const list = [...map.values()].sort((a, b) => a.createdAt - b.createdAt);
+    lists().set(chatId, list.slice(-800));
+    return list;
+  }
 
   function upsertMessage(msg) {
     msg = normalize(msg);
@@ -567,44 +585,42 @@
     }
     if (!text && !files.length) return;
 
-    const payload = {
-      type: 'message:send',
-      payload: {
-        chatId, text,
-        attachments: files.map((f) => ({
-          id: f.id, url: f.url, name: f.name, mime: f.mime, size: f.size,
-          duration: f._duration || 0, width: f.width || 0, height: f.height || 0, kind: f.kind,
-        })),
-        replyTo: S.replyTo, clientId: makeClientId(),
-      },
-    };
-    const clientId = payload.payload.clientId;
-
-    // оптимистичная отрисовка
-    const optimistic = {
-      id: clientId, chatId, authorId: S.me.id, author: S.me, text,
-      attachments: payload.payload.attachments, replyTo: S.replyTo ? replyQuoteData(S.replyTo) : null,
-      reactions: {}, createdAt: now(), pending: true, clientId,
-    };
-    const list = getList(chatId).concat([optimistic]).sort((a, b) => a.createdAt - b.createdAt);
-    lists().set(chatId, list);
-
-    if (conn.ws && conn.ws.readyState === 1) {
-      const ok = wsSend(payload);
-      if (!ok) queueOffline(payload.payload);
-    } else {
-      queueOffline(payload.payload);
-    }
-    S.replyTo = null;
-    renderReplyPreview();
+    postMessage(chatId, text, files.map((f) => ({
+      id: f.id, url: f.url, name: f.name, mime: f.mime, size: f.size,
+      duration: f._duration || 0, width: f.width || 0, height: f.height || 0, kind: f.kind,
+    })));
     S.pendingFiles = [];
     renderUploadPreview();
     $('#input').value = '';
     S.drafts.set(chatId, '');
     autoGrow();
+  }
+
+  /** Единая точка отправки: оптимистичная отрисовка + сокет/офлайн-очередь. */
+  function postMessage(chatId, text, attachments, opts = {}) {
+    const replyTo = opts.replyTo !== undefined ? opts.replyTo : S.replyTo;
+    const payload = {
+      type: 'message:send',
+      payload: { chatId, text, attachments, replyTo, clientId: makeClientId() },
+    };
+    const clientId = payload.payload.clientId;
+    const optimistic = {
+      id: clientId, chatId, authorId: S.me.id, author: S.me, text: text || '',
+      attachments, replyTo: replyTo ? replyQuoteData(replyTo) : null,
+      reactions: {}, createdAt: now(), pending: true, clientId,
+    };
+    lists().set(chatId, getList(chatId).concat([optimistic]).sort((a, b) => a.createdAt - b.createdAt));
+
+    if (conn.ws && conn.ws.readyState === 1) {
+      if (!wsSend(payload)) queueOffline(payload.payload);
+    } else {
+      queueOffline(payload.payload);
+    }
+    S.replyTo = null;
+    renderReplyPreview();
     beep('out');
-    renderMessages(false);
-    scrollToBottom(true);
+    if (chatId === S.activeId) { renderMessages(false); scrollToBottom(true); }
+    return clientId;
   }
 
   function replyQuoteData(id) {
@@ -960,10 +976,20 @@
         const duration = (now() - recStart) / 1000;
         if (duration < .6) { toast('Слишком короткая запись'); return; }
         const blob = new Blob(recChunks, { type: recorder.mimeType || 'audio/webm' });
-        const file = new File([blob], `голосовое-${new Date().toISOString().slice(11, 19).replace(/:/g, '')}.webm`, { type: blob.type });
+        const name = `голосовое-${new Date().toISOString().slice(11, 19).replace(/:/g, '')}.webm`;
+        const file = new File([blob], name, { type: blob.type });
         file._duration = duration;
-        await addFiles([file], { kind: 'voice' });
-        toast('Голосовое готово — нажмите «Отправить»');
+        // голосовое уходит сразу, отдельным сообщением — как в обычных мессенджерах
+        const chatId = S.activeId;
+        if (!chatId) return;
+        toast('Отправляю голосовое…');
+        try {
+          const meta = await uploadFile(file);
+          postMessage(chatId, '', [{
+            id: meta.id, url: meta.url, name: meta.name || name, mime: meta.mime, size: meta.size,
+            duration: Math.round(duration), kind: 'voice',
+          }]);
+        } catch (err) { toast('Не удалось отправить голосовое: ' + err.message, 'err'); }
       };
       recorder.start();
       recStart = now();
@@ -1045,6 +1071,10 @@
       <div class="panel-section">
         <h4>Аватар группы</h4>
         <div class="emoji-av-row" id="group-av">${['🚀', '🎧', '🔥', '🌈', '🍕', '💼', '🎮', '🐱', '⚽', '🎬'].map((e) => `<button data-gav="${e}">${e}</button>`).join('')}</div>
+        <div class="row-gap" style="margin-top:8px">
+          <button class="btn ghost sm" id="group-av-upload">📷 Загрузить своё фото</button>
+          ${chat.avatar ? '<button class="btn ghost sm" id="group-av-reset">↩ Убрать фото</button>' : ''}
+        </div>
       </div>` : ''}
       <div class="panel-section">
         <h4>Участники (${chat.members.length})</h4>
@@ -1149,7 +1179,10 @@
       <div class="modal-head"><h3>Настройки</h3><button class="icon-btn tiny" id="m-close">✕</button></div>
       <div class="modal-body">
         <div class="panel-profile">
-          ${avatarHTML(S.me, 'lg', true)}
+          <div class="settings-avatar">
+            <div id="s-avatar-preview" title="Нажмите, чтобы загрузить своё фото"></div>
+            <span class="muted-text" style="font-size:12px">Нажмите на аватар, чтобы загрузить своё фото</span>
+          </div>
           <h3 style="margin-top:8px">${esc(S.me ? S.me.displayName : '')}</h3>
           <p>@${esc(S.me ? S.me.username : '')}</p>
         </div>
@@ -1172,10 +1205,23 @@
           <div class="switch-row"><span>Enter отправляет сообщение</span><label class="switch"><input type="checkbox" id="s-enter" ${S.settings.enterSends ? 'checked' : ''}><span></span></label></div>
         </div>
         <div class="panel-section">
+          <h4>Звук и видео</h4>
+          <div class="device-row"><label>Микрофон</label><select id="d-mic"><option>по умолчанию</option></select></div>
+          <div class="device-row"><label>Камера</label><select id="d-cam"><option>по умолчанию</option></select></div>
+          <div class="device-row"><label>Динамики</label><select id="d-out"><option>по умолчанию</option></select></div>
+          <div class="row-gap" style="margin-top:6px">
+            <button class="btn ghost sm" id="d-perm">🔄 Обновить список устройств</button>
+            <button class="btn ghost sm" id="d-test">🎤 Проверить микрофон</button>
+          </div>
+          <div class="mic-meter" id="d-meter" hidden><i></i></div>
+          <div class="muted-text" id="d-hint" style="margin-top:6px">Устройства выбираются для звонков. Список подтянется после разрешения доступа.</div>
+        </div>
+        <div class="panel-section">
           <h4>Служебное</h4>
           <div class="row-gap">
             <button class="btn ghost sm" id="s-devices">📱 Устройства</button>
             <button class="btn ghost sm" id="s-sync">🔄 Полная синхронизация</button>
+            <button class="btn ghost sm" id="s-clear">🧹 Очистить локальные данные</button>
             <button class="btn ghost sm" id="s-logout">🚪 Выйти</button>
           </div>
           <div id="s-info" class="muted-text" style="margin-top:10px"></div>
@@ -1184,7 +1230,26 @@
       <div class="modal-foot"><button class="btn ghost" id="m-close2">Закрыть</button><button class="btn primary" id="s-save">Сохранить</button></div>`,
       (box) => {
         let avatar = S.me ? S.me.avatar : null;
+        const avPreview = $('#s-avatar-preview');
+        if (avPreview) avPreview.innerHTML = avatarHTML(S.me, 'lg', true);
+        const pickAvatarFile = () => {
+          const inp = document.createElement('input');
+          inp.type = 'file'; inp.accept = 'image/*';
+          inp.onchange = async () => {
+            const f = inp.files[0]; if (!f) return;
+            try {
+              toast('Загружаю картинку…');
+              const meta = await uploadFile(f, () => {});
+              avatar = meta.url;
+              if (avPreview) avPreview.innerHTML = avatarHTML(Object.assign({}, S.me, { avatar }), 'lg', true);
+              toast('Готово — нажмите «Сохранить»', 'ok');
+            } catch (err) { toast(err.message, 'err'); }
+          };
+          inp.click();
+        };
         box.addEventListener('click', async (e) => {
+          if (e.target.closest('#s-avatar-preview')) { pickAvatarFile(); return; }
+          if (e.target.closest('#d-save-devices')) { /* на случай старой вёрстки */ }
           const av = e.target.closest('[data-av]');
           if (av) { avatar = av.dataset.av; toast('Аватар выбран — не забудьте сохранить'); }
           if (e.target.closest('#s-av-upload')) {
@@ -1201,9 +1266,21 @@
             inp.click();
           }
           if (e.target.closest('#m-close') || e.target.closest('#m-close2')) closeModal();
+          if (e.target.closest('#d-perm') || e.target.closest('#s-av-upload')) { /* ниже */ }
+          if (e.target.closest('#d-perm')) { askDevicesPermission(); }
+          if (e.target.closest('#d-test')) { testMicrophone(); }
+          if (e.target.closest('#s-clear')) {
+            try {
+              for (const k of Object.keys(localStorage)) if (k.startsWith('k.')) localStorage.removeItem(k);
+              indexedDB.deleteDatabase('kontur');
+              toast('Локальный кэш, черновики и настройки очищены — перезагружаю…', 'ok');
+              setTimeout(() => location.reload(), 900);
+            } catch (err) { toast('Не удалось очистить: ' + err.message, 'err'); }
+          }
           if (e.target.closest('#s-save')) {
             try {
               const body = { displayName: $('#s-name').value, bio: $('#s-bio').value, email: $('#s-email').value, avatar };
+              saveDevicesFromForm();
               const d = await api('/me', { method: 'PATCH', body });
               S.me = d.user;
               $('#me-name').textContent = S.me.displayName;
@@ -1223,6 +1300,7 @@
             toast('Запрошен список устройств…');
           }
         });
+        fillDeviceList();
         api('/server/info').then((info) => {
           $('#s-info').innerHTML = `Сервер: <b>${esc(info.name)}</b> v${esc(info.version)} · пользователей: ${info.users}, чатов: ${info.chats}, сообщений: ${info.messages}<br>Событий синхронизации: ${S.seq} · задержка: ${conn.ping} мс`;
         }).catch(() => {});
@@ -1232,11 +1310,114 @@
   function fullResync() {
     localStorage.setItem(seqKey(), '0');
     S.seq = 0;
+    lists().clear();
     for (const c of S.chats.keys()) idb.put(c, []);
     wsSend({ type: 'sync', payload: { since: 0 } });
     loadChats();
     refreshActiveMessages();
     toast('Запущена полная синхронизация 🔄', 'ok');
+  }
+
+  /* ------------------------------------------------------- устройства ввода */
+
+  async function askDevicesPermission() {
+    const hint = $('#d-hint');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+      for (const t of stream.getTracks()) t.stop();
+      if (hint) hint.textContent = 'Доступ выдан — список устройств обновлён.';
+    } catch (err) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        for (const t of stream.getTracks()) t.stop();
+        if (hint) hint.textContent = 'Микрофон доступен, камера — нет.';
+      } catch (err2) {
+        if (hint) hint.textContent = 'Нет доступа к устройствам: ' + err2.message + '. По http:// вне localhost браузер запрещает доступ — включите HTTPS (флаг --https на сервере).';
+        toast('Нет доступа к микрофону/камере', 'err');
+        return;
+      }
+    }
+    await fillDeviceList();
+  }
+
+  async function fillDeviceList() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+    let devices = [];
+    try { devices = await navigator.mediaDevices.enumerateDevices(); } catch { return; }
+    const groups = {
+      'd-mic': ['audioinput', S.settings.devices && S.settings.devices.audioIn],
+      'd-cam': ['videoinput', S.settings.devices && S.settings.devices.videoIn],
+      'd-out': ['audiooutput', S.settings.devices && S.settings.devices.audioOut],
+    };
+    for (const [id, [kind, selected]] of Object.entries(groups)) {
+      const sel = document.getElementById(id);
+      if (!sel) continue;
+      const list = devices.filter((d) => d.kind === kind);
+      sel.innerHTML = '<option value="">по умолчанию</option>' + list.map((d, i) =>
+        `<option value="${esc(d.deviceId)}">${esc(d.label || (kind === 'audioinput' ? 'Микрофон ' : kind === 'videoinput' ? 'Камера ' : 'Устройство ') + (i + 1))}</option>`).join('');
+      if (selected) sel.value = selected;
+      if (!list.length) sel.innerHTML = '<option value="">нет доступных устройств</option>';
+    }
+    const outSel = document.getElementById('d-out');
+    if (outSel && !(outSel.setSinkId || HTMLMediaElement.prototype.setSinkId)) {
+      outSel.disabled = true;
+      outSel.innerHTML = '<option value="">выбор выхода не поддерживается браузером</option>';
+    }
+  }
+
+  function saveDevicesFromForm() {
+    S.settings.devices = {
+      audioIn: ($('#d-mic') || {}).value || '',
+      videoIn: ($('#d-cam') || {}).value || '',
+      audioOut: ($('#d-out') || {}).value || '',
+    };
+    saveSettings();
+    applyAudioOutput();
+  }
+
+  /** Направляем звук звонка на выбранное устройство вывода (если браузер умеет). */
+  function applyAudioOutput() {
+    const id = S.settings.devices && S.settings.devices.audioOut;
+    if (!id) return;
+    for (const el of $$('audio, video')) {
+      if (typeof el.setSinkId === 'function') el.setSinkId(id).catch(() => {});
+    }
+  }
+
+  let micTest = null;
+  async function testMicrophone() {
+    const meter = $('#d-meter');
+    const hint = $('#d-hint');
+    if (micTest) {                                   // повторный клик — остановить
+      clearInterval(micTest.timer);
+      try { micTest.ctx.close(); } catch {}
+      for (const t of micTest.stream.getTracks()) t.stop();
+      micTest = null;
+      if (meter) { meter.hidden = true; meter.querySelector('i').style.width = '0%'; }
+      return;
+    }
+    try {
+      const deviceId = ($('#d-mic') || {}).value;
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: deviceId ? { deviceId: { exact: deviceId } } : true });
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const src = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      src.connect(analyser);
+      const data = new Uint8Array(analyser.fftSize);
+      if (meter) meter.hidden = false;
+      if (hint) hint.textContent = 'Говорите — полоска должна двигаться. Повторное нажатие останавливает проверку.';
+      micTest = {
+        stream, ctx,
+        timer: setInterval(() => {
+          analyser.getByteTimeDomainData(data);
+          let peak = 0;
+          for (const v of data) peak = Math.max(peak, Math.abs(v - 128) / 128);
+          const bar = meter && meter.querySelector('i');
+          if (bar) bar.style.width = Math.min(100, Math.round(peak * 190)) + '%';
+        }, 80),
+      };
+    } catch (err) { toast('Микрофон недоступен: ' + err.message, 'err'); }
   }
 
   function askNotifyPermission() {
@@ -1248,9 +1429,9 @@
   }
 
   function logout() {
-    localStorage.removeItem('k.token');
-    localStorage.removeItem(seqKey());
     try { conn.ws && conn.ws.close(); } catch {}
+    for (const k of Object.keys(localStorage)) if (k.startsWith('k.')) localStorage.removeItem(k);
+    try { indexedDB.deleteDatabase('kontur'); } catch {}
     location.reload();
   }
 
@@ -1480,12 +1661,8 @@
     });
 
     // эмодзи
-    $('#btn-emoji').addEventListener('click', () => {
-      const p = $('#emoji-panel');
-      p.hidden = !p.hidden;
-      $('#app').classList.toggle('with-panel', !p.hidden || !$('#panel').hidden);
-    });
-    $('#btn-emoji-close').addEventListener('click', () => { $('#emoji-panel').hidden = true; $('#app').classList.remove('with-panel'); });
+    $('#btn-emoji').addEventListener('click', () => toggleEmoji());
+    $('#btn-emoji-close').addEventListener('click', () => toggleEmoji(false));
     $('#emoji-grid').addEventListener('click', (e) => {
       const cell = e.target.closest('[data-emoji]');
       if (!cell) return;
@@ -1544,6 +1721,27 @@
       }
       const gav = e.target.closest('[data-gav]');
       if (gav) { try { const d = await api('/chats/' + chat.id, { method: 'PATCH', body: { avatar: gav.dataset.gav } }); upsertChat(d.chat); renderChatHeader(); renderPanel(); } catch (err) { toast(err.message, 'err'); } }
+      if (e.target.closest('#group-av-upload')) {
+        const inp = document.createElement('input');
+        inp.type = 'file'; inp.accept = 'image/*';
+        inp.onchange = async () => {
+          const f = inp.files[0]; if (!f) return;
+          try {
+            toast('Загружаю фото группы…');
+            const meta = await uploadFile(f, () => {});
+            const d = await api('/chats/' + chat.id, { method: 'PATCH', body: { avatar: meta.url } });
+            upsertChat(d.chat); renderChatHeader(); renderPanel(); renderChats();
+            toast('Аватар группы обновлён ✅', 'ok');
+          } catch (err) { toast(err.message, 'err'); }
+        };
+        inp.click();
+      }
+      if (e.target.closest('#group-av-reset')) {
+        try {
+          const d = await api('/chats/' + chat.id, { method: 'PATCH', body: { avatar: null } });
+          upsertChat(d.chat); renderChatHeader(); renderPanel(); renderChats();
+        } catch (err) { toast(err.message, 'err'); }
+      }
       const kick = e.target.closest('[data-kick]');
       if (kick) { try { await api(`/chats/${chat.id}/members/${kick.dataset.kick}`, { method: 'DELETE' }); toast('Участник исключён'); } catch (err) { toast(err.message, 'err'); } }
       if (e.target.closest('#btn-add-members')) {
@@ -1639,7 +1837,7 @@
     const prevHeight = box.scrollHeight;
     try {
       const d = await api(`/chats/${chatId}/messages?limit=60&before=${before}`);
-      lists().set(chatId, d.messages.map(normalize).concat(list));
+      mergeMessages(chatId, d.messages);
       S.hasMore[chatId] = d.hasMore;
       renderMessages(true);
       box.scrollTop = box.scrollHeight - prevHeight;
@@ -1649,19 +1847,39 @@
   async function loadContextAround(messageId) {
     const chatId = S.activeId;
     if (!chatId) return;
+    if (scrollToMessage(messageId)) return;                       // сообщение уже в ленте — просто прыгаем
     const d = await api(`/chats/${chatId}/messages?limit=60&before=${messageId}`);
-    const list = getList(chatId);
-    lists().set(chatId, d.messages.map(normalize).concat(list));
+    mergeMessages(chatId, d.messages);                            // склейка по id: дублей не будет
     renderMessages(true);
     setTimeout(() => scrollToMessage(messageId), 60);
+  }
+
+  function syncPanelClasses() {
+    const app = $('#app');
+    app.classList.toggle('with-panel', !$('#panel').hidden);
+    app.classList.toggle('with-emoji', !$('#emoji-panel').hidden);
+    // на узких экранах панели открываются поверх чата — закрываем вторую
+    if (window.innerWidth <= 1100) {
+      if (!$('#panel').hidden) $('#emoji-panel').hidden = true;
+      app.classList.remove('with-emoji');
+      if (!$('#emoji-panel').hidden) { $('#panel').hidden = true; app.classList.remove('with-panel'); }
+    }
   }
 
   function togglePanel(force) {
     const panel = $('#panel');
     const show = typeof force === 'boolean' ? force : panel.hidden;
+    if (show) { $('#emoji-panel').hidden = true; renderPanel(); }   // одновременно — только одна панель
     panel.hidden = !show;
-    if (show) { renderPanel(); }
-    $('#app').classList.toggle('with-panel', show || !$('#emoji-panel').hidden);
+    syncPanelClasses();
+  }
+
+  function toggleEmoji(force) {
+    const p = $('#emoji-panel');
+    const show = typeof force === 'boolean' ? force : p.hidden;
+    if (show) { $('#panel').hidden = true; }
+    p.hidden = !show;
+    syncPanelClasses();
   }
 
   function showDemoInfo() {
@@ -1754,7 +1972,7 @@
     if (location.hash === '#demo' && !S.token && S.demoMode) $('#btn-demo').click();
   }
 
-  window.K = { S, api, toast, beep, avatarHTML, esc, markup, initials, shade, fmtTime, fmtDay, fmtBytes, fmtDuration, previewText, getChat, getList, renderChats, renderPanel, renderChatHeader, upsertChat, api_: api, uploadFile, openChat, renderMessages, scrollToBottom };
+  window.K = { S, api, toast, beep, avatarHTML, esc, markup, initials, shade, fmtTime, fmtDay, fmtBytes, fmtDuration, previewText, getChat, getList, renderChats, renderPanel, renderChatHeader, upsertChat, api_: api, uploadFile, openChat, renderMessages, scrollToBottom, loadContextAround, mergeMessages, togglePanel, toggleEmoji, postMessage, fillDeviceList, openSettings };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 })();
