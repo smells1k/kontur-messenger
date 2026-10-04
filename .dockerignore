@@ -1,0 +1,9 @@
+node_modules
+**/node_modules
+release
+release-desktop
+build
+data
+docker-data
+*.exe
+*.log

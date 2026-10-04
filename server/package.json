@@ -1,0 +1,23 @@
+{
+  "name": "server",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/smoke.js",
+    "test:client": "node test/client-smoke.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "emojilib": "^4.0.3",
+    "express": "^5.2.1",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "emoji-datasource": "^16.0.0",
+    "jsdom": "^29.1.1"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "kontur-messenger",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Мессенджер на Node.js: сервер, веб-клиент, .exe для Windows. Текст, файлы, видео, эмодзи, группы, синхронизация",
+  "scripts": {
+    "start": "node server/server.js --open",
+    "server": "node server/server.js",
+    "install:deps": "cd server && npm install",
+    "test": "cd server && node test/smoke.js",
+    "test:client": "cd server && node test/client-smoke.js",
+    "build:exe": "bash build/make-windows-exe.sh",
+    "build:desktop": "bash build/build-electron-win.sh",
+    "docker": "docker compose up -d"
+  },
+  "license": "MIT"
+}

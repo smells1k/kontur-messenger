@@ -1,0 +1,11 @@
+node_modules/
+data/
+docker-data/
+build/staging/
+release/
+release-desktop/
+dist/
+dist-test/
+launcher/dist/
+*.log
+.DS_Store

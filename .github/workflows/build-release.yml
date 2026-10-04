@@ -1,0 +1,61 @@
+name: Сборка .exe и релиз
+
+on:
+  workflow_dispatch:            # кнопка «Run workflow» в интерфейсе GitHub
+  push:
+    tags: ['v*']                # поставить тег v1.0.0 → соберётся релиз с .exe
+  pull_request:
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Зависимости сервера
+        run: cd server && npm install --omit=dev --no-audit --no-fund
+
+      - name: Тесты сервера и клиента (75 проверок)
+        run: |
+          cd server
+          node server.js --port 4100 --data /tmp/kontur-ci --quiet &
+          sleep 3
+          npm install --no-save jsdom --no-audit --no-fund
+          node test/smoke.js http://localhost:4100
+          node test/client-smoke.js http://localhost:4100
+
+      - name: Сборка KonturServer.exe (Windows x64)
+        run: BUILD_LINUX_TOO=0 bash build/make-windows-exe.sh
+
+      - name: Артефакт «KonturServer-windows»
+        uses: actions/upload-artifact@v4
+        with:
+          name: KonturServer-windows
+          path: |
+            release/KonturServer.exe
+            release/README-KLIENT.txt
+          if-no-files-found: error
+
+      - name: Публикация релиза (только для тега)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Мессенджер «Контур» ${{ github.ref_name }}
+          body: |
+            ## 💬 Мессенджер «Контур»
+
+            **Windows:** скачайте `KonturServer.exe`, положите в любую папку и запустите двойным кликом —
+            поднимется сервер, откроется окно мессенджера, а в консоли появится адрес для друзей в локальной сети.
+
+            **Любая ОС:** `git clone` → `cd server && npm install && node server.js`.
+
+            Демо-вход: кнопка на странице входа или логин `anya`/`boris`/`vera`/`gleb`, пароль `demo1234`, бот `@bot`.
+          files: |
+            release/KonturServer.exe
+            release/README-KLIENT.txt
+          draft: false
+          generate_release_notes: true

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Адрес сервера</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; font: 14px "Segoe UI", system-ui, sans-serif; background: #151b2b; color: #e8edf7; padding: 20px; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  p { color: #9aa7bf; font-size: 12.5px; margin: 0 0 14px; line-height: 1.5; }
+  label { display: block; font-size: 12px; color: #9aa7bf; margin-bottom: 6px; }
+  input[type=text] { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 10px;
+    border: 1px solid #232d42; background: #1b2333; color: #e8edf7; outline: none; }
+  input[type=text]:focus { border-color: #6c8cff; }
+  .row { display: flex; gap: 10px; align-items: center; margin: 12px 0; font-size: 13px; }
+  .btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+  button { border: 0; border-radius: 10px; padding: 9px 16px; cursor: pointer; font-weight: 600; font-size: 13px; }
+  .primary { background: linear-gradient(135deg, #6c8cff, #a06bff); color: #fff; }
+  .ghost { background: transparent; border: 1px solid #232d42; color: #e8edf7; }
+  .hint { font-size: 12px; color: #7bc862; min-height: 16px; margin-top: 8px; }
+</style>
+</head>
+<body>
+  <h1>Адрес сервера мессенджера</h1>
+  <p>Оставьте <code>http://127.0.0.1:4000</code>, если сервер запускается на этом компьютере.
+     Укажите адрес другого компьютера в сети (например <code>http://192.168.1.10:4000</code>), чтобы подключиться к общему серверу.</p>
+  <label for="url">Адрес</label>
+  <input type="text" id="url" placeholder="http://127.0.0.1:4000" spellcheck="false">
+  <div class="row"><input type="checkbox" id="auto"><label for="auto" style="margin:0">Запускать локальный сервер автоматически, если он не найден</label></div>
+  <div class="hint" id="hint"></div>
+  <div class="btns">
+    <button class="ghost" id="check">Проверить связь</button>
+    <button class="ghost" id="cancel">Отмена</button>
+    <button class="primary" id="save">Сохранить</button>
+  </div>
+<script>
+  const api = window.kontur || null;
+  const $ = (s) => document.querySelector(s);
+  (async () => {
+    const cfg = api ? await api.getSettings() : { serverUrl: 'http://127.0.0.1:4000', autoStartServer: true };
+    $('#url').value = cfg.serverUrl || 'http://127.0.0.1:4000';
+    $('#auto').checked = cfg.autoStartServer !== false;
+  })();
+  $('#save').onclick = async () => {
+    const url = $('#url').value.trim() || 'http://127.0.0.1:4000';
+    if (api) await api.saveSettings({ serverUrl: url, autoStartServer: $('#auto').checked });
+  };
+  $('#cancel').onclick = () => window.close();
+  $('#check').onclick = async () => {
+    $('#hint').textContent = 'Проверяю…';
+    try {
+      const res = await fetch($('#url').value.trim().replace(/\/$/, '') + '/health');
+      $('#hint').textContent = res.ok ? '✅ Сервер отвечает' : '⚠️ Сервер ответил кодом ' + res.status;
+    } catch (err) { $('#hint').textContent = '❌ Не удалось подключиться: ' + err.message; }
+  };
+</script>
+</body>
+</html>

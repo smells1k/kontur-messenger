@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0f1420">
+<title>Мессенджер «Контур»</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon-192.png">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<!-- ============================= ЭКРАН ВХОДА ============================= -->
+<div id="auth-screen" class="auth-screen">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <svg viewBox="0 0 48 48" width="56" height="56" aria-hidden="true">
+        <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#6c8cff"/><stop offset="1" stop-color="#a06bff"/>
+        </linearGradient></defs>
+        <rect x="3" y="8" width="42" height="30" rx="10" fill="url(#lg)"/>
+        <path d="M14 38 L20 38 L14 45 Z" fill="url(#lg)"/>
+        <circle cx="17" cy="23" r="3" fill="#fff"/><circle cx="24" cy="23" r="3" fill="#fff"/><circle cx="31" cy="23" r="3" fill="#fff"/>
+      </svg>
+    </div>
+    <h1>Мессенджер «Контур»</h1>
+    <p class="auth-sub">Текст, файлы, вебки, эмодзи, группы и синхронизация между устройствами</p>
+
+    <div class="auth-tabs">
+      <button class="auth-tab active" data-mode="login">Вход</button>
+      <button class="auth-tab" data-mode="register">Регистрация</button>
+    </div>
+
+    <form id="auth-form" autocomplete="on">
+      <label class="field"><span>Логин</span>
+        <input id="auth-username" name="username" placeholder="anya" autocomplete="username" required>
+      </label>
+      <label class="field" id="field-display" hidden><span>Как вас зовут</span>
+        <input id="auth-display" name="displayName" placeholder="Аня Орлова">
+      </label>
+      <label class="field"><span>Пароль</span>
+        <input id="auth-password" name="password" type="password" placeholder="demo1234" autocomplete="current-password" required>
+      </label>
+      <button class="btn primary block" type="submit" id="auth-submit">Войти</button>
+      <div class="auth-error" id="auth-error" hidden></div>
+    </form>
+
+    <div class="auth-divider"><span>или</span></div>
+    <button class="btn ghost block" id="btn-demo">🚀 Демо-вход (без регистрации)</button>
+    <div class="demo-hint" id="demo-hint" hidden></div>
+    <p class="auth-foot">Сервер: <code id="server-url">—</code> · <span id="server-status">подключение…</span></p>
+  </div>
+</div>
+
+<!-- ============================== ПРИЛОЖЕНИЕ ============================== -->
+<div id="app" class="app" hidden>
+
+  <!-- левая колонка: список чатов -->
+  <aside class="sidebar" id="sidebar">
+    <header class="sidebar-head">
+      <button class="icon-btn" id="btn-menu" title="Меню">
+        <svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <div class="search-wrap">
+        <svg class="search-ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input id="search" placeholder="Поиск чатов и людей…" autocomplete="off">
+        <button class="icon-btn tiny" id="btn-search-clear" hidden title="Очистить">✕</button>
+      </div>
+      <button class="icon-btn" id="btn-new-chat" title="Новый чат / группа">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+    </header>
+
+    <div class="chat-filter" id="chat-filter">
+      <button class="chip active" data-filter="all">Все</button>
+      <button class="chip" data-filter="unread">Непрочитанные</button>
+      <button class="chip" data-filter="groups">Группы</button>
+      <button class="chip" data-filter="bots">Боты</button>
+      <button class="chip" data-filter="saved">Меню</button>
+    </div>
+
+    <div class="chat-list" id="chat-list"></div>
+
+    <footer class="sidebar-foot">
+      <button class="me-card" id="btn-profile">
+        <div class="avatar" id="me-avatar"></div>
+        <div class="me-info">
+          <div class="me-name" id="me-name">—</div>
+          <div class="me-status" id="me-status">онлайн</div>
+        </div>
+        <svg class="gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg>
+      </button>
+    </footer>
+  </aside>
+
+  <!-- центральная колонка: чат -->
+  <main class="chat" id="chat">
+    <div class="empty-state" id="empty-state">
+      <svg viewBox="0 0 120 120" width="130" height="130"><rect x="12" y="26" width="96" height="62" rx="18" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="42" cy="57" r="6" fill="currentColor"/><circle cx="60" cy="57" r="6" fill="currentColor"/><circle cx="78" cy="57" r="6" fill="currentColor"/><path d="M30 88 L22 104 L46 88" fill="currentColor"/></svg>
+      <h2>Выберите чат</h2>
+      <p>Или создайте новый — личный, группу, и позвоните по видео 🎥</p>
+      <button class="btn primary" id="btn-new-chat-2">Начать общение</button>
+    </div>
+
+    <div class="chat-view" id="chat-view" hidden>
+      <header class="chat-head">
+        <button class="icon-btn back" id="btn-back" title="Назад">
+          <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <button class="chat-title-btn" id="btn-chat-info">
+          <div class="avatar sm" id="chat-avatar"></div>
+          <div class="chat-title-text">
+            <div class="chat-name" id="chat-name">—</div>
+            <div class="chat-sub" id="chat-sub">—</div>
+          </div>
+        </button>
+        <div class="chat-head-actions">
+          <button class="icon-btn" id="btn-search-chat" title="Поиск в чате">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          </button>
+          <button class="icon-btn call" id="btn-call-audio" title="Аудиозвонок">
+            <svg viewBox="0 0 24 24"><path d="M5 4h4l2 5-3 2a12 12 0 0 0 5 5l2-3 5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z"/></svg>
+          </button>
+          <button class="icon-btn call" id="btn-call-video" title="Видеозвонок">
+            <svg viewBox="0 0 24 24"><rect x="3" y="6" width="12" height="12" rx="3"/><path d="M15 10l6-3v10l-6-3"/></svg>
+          </button>
+          <button class="icon-btn" id="btn-panel" title="Участники и информация">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="pin-bar" id="pin-bar" hidden></div>
+      <div class="search-bar" id="search-bar" hidden>
+        <input id="chat-search-input" placeholder="Найти сообщение в чате…">
+        <span class="search-count" id="chat-search-count"></span>
+        <button class="icon-btn tiny" id="btn-chat-search-close">✕</button>
+      </div>
+      <div class="search-results" id="search-results" hidden></div>
+
+      <div class="messages" id="messages" tabindex="0">
+        <div class="load-more-wrap"><button class="btn ghost sm" id="btn-load-more" hidden>↑ Показать историю</button></div>
+        <div id="messages-inner"></div>
+        <button class="scroll-down" id="btn-scroll-down" hidden title="Вниз">↓</button>
+      </div>
+
+      <div class="typing-line" id="typing-line"></div>
+
+      <div class="drop-hint" id="drop-hint">Отпустите файлы, чтобы отправить 📎</div>
+
+      <footer class="composer">
+        <div class="reply-preview" id="reply-preview" hidden>
+          <div class="reply-bar"></div>
+          <div class="reply-text"><b id="reply-title">Ответ</b><span id="reply-body"></span></div>
+          <button class="icon-btn tiny" id="btn-reply-cancel">✕</button>
+        </div>
+        <div class="upload-preview" id="upload-preview" hidden></div>
+        <div class="composer-row">
+          <button class="icon-btn" id="btn-attach" title="Прикрепить файл">
+            <svg viewBox="0 0 24 24"><path d="M21 12.5 12.7 20.8a5 5 0 0 1-7-7l8.4-8.4a3.5 3.5 0 0 1 5 5l-8.4 8.4a2 2 0 0 1-2.8-2.8l7.7-7.7"/></svg>
+          </button>
+          <button class="icon-btn" id="btn-emoji" title="Эмодзи">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0"/><circle cx="9" cy="10" r="1.2" fill="currentColor"/><circle cx="15" cy="10" r="1.2" fill="currentColor"/></svg>
+          </button>
+          <textarea id="input" rows="1" placeholder="Написать сообщение…  (Enter — отправить, Shift+Enter — новая строка)" autocomplete="off"></textarea>
+          <button class="icon-btn mic" id="btn-voice" title="Голосовое сообщение">
+            <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+          </button>
+          <button class="btn send" id="btn-send" title="Отправить">
+            <svg viewBox="0 0 24 24"><path d="M4 12l16-8-6 8 6 8-16-8z"/></svg>
+          </button>
+        </div>
+        <div class="composer-hint" id="composer-hint"></div>
+      </footer>
+    </div>
+  </main>
+
+  <!-- правая колонка: участники / инфо / эмодзи -->
+  <aside class="panel" id="panel" hidden>
+    <header class="panel-head">
+      <span id="panel-title">Информация</span>
+      <button class="icon-btn tiny" id="btn-panel-close">✕</button>
+    </header>
+    <div class="panel-body" id="panel-body"></div>
+  </aside>
+
+  <aside class="emoji-panel" id="emoji-panel" hidden>
+    <header class="panel-head">
+      <span>Эмодзи</span>
+      <button class="icon-btn tiny" id="btn-emoji-close">✕</button>
+    </header>
+    <div class="emoji-search"><input id="emoji-q" placeholder="Поиск эмодзи: сердце, cat, lol…"></div>
+    <div class="emoji-cats" id="emoji-cats"></div>
+    <div class="emoji-grid" id="emoji-grid"></div>
+  </aside>
+</div>
+
+<!-- ============================ МОДАЛЬНЫЕ ОКНА ============================ -->
+<div class="overlay" id="modal" hidden><div class="modal" id="modal-box"></div></div>
+<div class="overlay" id="menu-overlay" hidden></div>
+<div id="context-menu" class="context-menu" hidden></div>
+<div id="toasts" class="toasts"></div>
+
+<!-- ============================== ЗВОНОК ============================== -->
+<div id="call-screen" class="call-screen" hidden>
+  <div class="call-top">
+    <div class="call-info">
+      <div class="call-title" id="call-title">Звонок</div>
+      <div class="call-sub" id="call-sub">соединение…</div>
+    </div>
+    <button class="icon-btn" id="btn-call-minimize" title="Свернуть">▭</button>
+  </div>
+  <div class="call-grid" id="call-grid"></div>
+  <div class="call-controls">
+    <button class="ctl" id="ctl-mic" title="Микрофон"><span>🎙</span></button>
+    <button class="ctl" id="ctl-cam" title="Камера"><span>📷</span></button>
+    <button class="ctl" id="ctl-screen" title="Показать экран"><span>🖥</span></button>
+    <button class="ctl" id="ctl-effects" title="Сменить фон/эффект"><span>✨</span></button>
+    <button class="ctl danger" id="ctl-hangup" title="Завершить"><span>📵</span></button>
+  </div>
+  <div class="call-mini" id="call-mini" hidden>Звонок свёрнут — нажмите, чтобы вернуться</div>
+</div>
+
+<!-- ======================= ВХОДЯЩИЙ ЗВОНОК ======================= -->
+<div id="incoming" class="incoming" hidden>
+  <div class="incoming-card">
+    <div class="avatar lg" id="incoming-avatar"></div>
+    <div class="incoming-name" id="incoming-name">Входящий звонок</div>
+    <div class="incoming-sub" id="incoming-sub">видеозвонок в группе</div>
+    <div class="incoming-actions">
+      <button class="ctl danger big" id="btn-decline"><span>📵</span><b>Отклонить</b></button>
+      <button class="ctl ok big" id="btn-accept"><span>📞</span><b>Ответить</b></button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================== ПРОСМОТР ============================== -->
+<div id="lightbox" class="lightbox" hidden><img id="lightbox-img" alt=""><button class="icon-btn" id="lightbox-close">✕</button></div>
+
+<div id="offline-banner" class="offline-banner" hidden>⚡️ Нет соединения с сервером — сообщения отправятся автоматически</div>
+<div id="drag-overlay" class="drag-overlay" hidden><div>📎 Отпустите, чтобы прикрепить</div></div>
+
+<script src="/js/emoji-data.js"></script>
+<script src="/js/app.js"></script>
+<script src="/js/call.js"></script>
+</body>
+</html>

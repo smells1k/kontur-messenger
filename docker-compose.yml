@@ -1,0 +1,14 @@
+services:
+  kontur:
+    build: .
+    container_name: kontur-messenger
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./docker-data:/data
+    environment:
+      - DATA_DIR=/data
+      - PORT=4000
+      # - REGISTRATION_OPEN=0    # чтобы закрыть регистрацию
+      # - DEMO=0                 # выключить демо-аккаунты и бота
+    restart: unless-stopped

@@ -1,0 +1,92 @@
+{
+  "name": "kontur-desktop",
+  "productName": "Kontur",
+  "version": "1.0.0",
+  "description": "Десктопный клиент мессенджера «Контур» (Electron): синхронизация, группы, файлы, звонки WebRTC",
+  "main": "main.js",
+  "author": "Kontur",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win nsis portable --x64",
+    "dist:linux": "electron-builder --linux AppImage --x64"
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "app.kontur.messenger",
+    "productName": "Kontur",
+    "directories": {
+      "output": "../release-desktop",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "settings.html",
+      "build/icon.ico",
+      "build/icon.png"
+    ],
+    "extraResources": [
+      {
+        "from": "../server",
+        "to": "server",
+        "filter": [
+          "**/*",
+          "!test/**",
+          "!node_modules/.cache/**"
+        ]
+      },
+      {
+        "from": "../web",
+        "to": "web",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../release/KonturServer.exe",
+        "to": "KonturServer.exe"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "Kontur-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Мессенджер Контур",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico"
+    },
+    "portable": {
+      "artifactName": "Kontur-Portable-${version}.exe"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "icon": "build/icon.png",
+      "category": "Network"
+    }
+  }
+}
