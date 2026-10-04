@@ -167,7 +167,34 @@ class Store {
     const chat = this.getChat(full.chatId);
     if (chat) { chat.lastMessageId = id; chat.updatedAt = full.createdAt; }
     this.save();
+    if (full.clientId) this._clientIndex().set(this._clientKey(full.chatId, full.authorId, full.clientId), id);
     return full;
+  }
+
+  /* ------------------------------------------- защита от двойной отправки */
+
+  _clientKey(chatId, authorId, clientId) { return `${chatId}|${authorId}|${clientId}`; }
+
+  /**
+   * Индекс «клиентский идентификатор → сообщение» строится один раз и обновляется
+   * при добавлении. Нужен, чтобы повторная отправка (переподключение, повтор
+   * из очереди, повторный клик) не создавала второй дубль сообщения.
+   */
+  _clientIndex() {
+    if (this._clientIdx) return this._clientIdx;
+    const map = new Map();
+    for (const m of Object.values(this.data.messages)) {
+      if (m && m.clientId) map.set(this._clientKey(m.chatId, m.authorId, m.clientId), m.id);
+    }
+    this._clientIdx = map;
+    return map;
+  }
+
+  /** Уже есть сообщение от этого автора с таким clientId? */
+  findByClientId(chatId, authorId, clientId) {
+    if (!clientId) return null;
+    const id = this._clientIndex().get(this._clientKey(chatId, authorId, clientId));
+    return id ? this.getMessage(id) : null;
   }
 
   getMessage(id) { return this.data.messages[id] || null; }
@@ -217,11 +244,17 @@ class Store {
 
   unreadCount(chatId, userId) {
     const ids = this.messageIds(chatId);
+    // Служебные сообщения («Вася создал группу») прочитанными не считаются —
+    // они не должны зажигать счётчик новых сообщений.
+    const countable = (id) => {
+      const m = this.data.messages[id];
+      return m && !m.deleted && !m.system && m.authorId !== userId;
+    };
     const { lastMessageId } = this.readState(chatId, userId);
-    if (!lastMessageId) return ids.filter((id) => this.data.messages[id] && !this.data.messages[id].deleted && this.data.messages[id].authorId !== userId).length;
+    if (!lastMessageId) return ids.filter(countable).length;
     const idx = ids.indexOf(lastMessageId);
     if (idx < 0) return 0;
-    return ids.slice(idx + 1).filter((id) => this.data.messages[id] && !this.data.messages[id].deleted && this.data.messages[id].authorId !== userId).length;
+    return ids.slice(idx + 1).filter(countable).length;
   }
 
   /* ------------------------------------------------------------ синхронизация */

@@ -796,10 +796,22 @@
     return { id: m.id, author: m.author || S.me, text: m.text || '', attachments: m.attachments || [] };
   }
 
+  /**
+   * Полоска «нет соединения». Раньше эту функцию вызывали, но не объявляли —
+   * из-за этого отправка сообщения без сети падала с ошибкой и в очередь
+   * ничего не попадало (сообщение просто пропадало).
+   */
+  function showOfflineBanner(show, text) {
+    const banner = $('#offline-banner');
+    if (!banner) return;
+    if (text) banner.textContent = text;
+    banner.hidden = !show;
+  }
+
   function queueOffline(payload) {
     S.outbox.push(payload);
     saveOutbox();
-    showOfflineBanner(true);
+    showOfflineBanner(true, `⚡️ Нет соединения — сообщение ждёт отправки (${S.outbox.length} в очереди)`);
   }
 
   function flushOutbox() {
@@ -807,8 +819,12 @@
     const items = S.outbox.slice();
     S.outbox = [];
     saveOutbox();
-    for (const p of items) wsSend({ type: 'message:send', payload: p });
-    toast(`Отправлено отложенных сообщений: ${items.length}`, 'ok');
+    let sent = 0;
+    for (const p of items) { if (wsSend({ type: 'message:send', payload: p })) sent++; else S.outbox.push(p); }
+    saveOutbox();
+    if (sent) toast(`Отправлено отложенных сообщений: ${sent}`, 'ok');
+    // полоску убирает setConnState('online'), но если что-то осталось — оставляем
+    if (!S.outbox.length) showOfflineBanner(false);
   }
 
   function wsSend(obj) {
@@ -906,13 +922,21 @@
         toast(p.message || 'Ошибка', 'err');
         const r = pendingRequests.get(p.requestId);
         if (r) { clearTimeout(r.timer); pendingRequests.delete(p.requestId); r.reject(new Error(p.message)); }
-        if (p.request === 'message:send' && p.payload && p.payload.clientId) removeOptimistic(p.payload.clientId);
+        // Сервер вернул clientId недошедшего сообщения — убираем его из переписки,
+        // чтобы оно не висело вечно с «часиками» отправки.
+        if (p.request === 'message:send' && p.clientId) removeOptimistic(p.clientId);
         break;
       }
       case 'message:ack': {
         const list = getList(p.chatId);
         const m = list.find((x) => (x.clientId && x.clientId === p.clientId) || x.id === p.clientId);
-        if (m) { m.id = p.id; m.pending = false; }
+        if (m) {
+          m.id = p.id;
+          m.pending = false;
+          // Перерисовываем: в разметке сообщения хранится его id, и до перерисовки
+          // меню/действия по «только что отправленному» сообщению искали старый id.
+          if (p.chatId === S.activeId) renderMessages();
+        }
         break;
       }
       case 'pong': conn.ping = now() - (p.ts || now()); break;
@@ -952,7 +976,13 @@
       }
       case 'message:updated': upsertMessage(p.message); break;
       case 'chat:upsert': upsertChat(p.chat); renderChats(); if (p.chat && p.chat.id === S.activeId) { renderChatHeader(); renderPinned(); } break;
-      case 'chat:new': if (!S.chats.has(p.chatId)) loadChats(); break;
+      case 'chat:new': {
+        // Сервер присылает готовое представление чата (у личного чата оно своё
+        // для каждого участника). Если пришёл только id — подгружаем список.
+        if (p.chat) { upsertChat(p.chat); renderChats(); }
+        else if (!S.chats.has(p.chatId)) loadChats();
+        break;
+      }
       case 'chat:refresh': loadChats(); if (p.chatId === S.activeId) refreshActiveMessages(); break;
       case 'chat:removed': S.chats.delete(p.chatId); if (S.activeId === p.chatId) closeChat(); renderChats(); break;
       case 'read': {
@@ -1652,7 +1682,12 @@
   }
 
   /* ------------------------------------------------------------- контекст-меню */
-  function openContextMenu(x, y, items) {
+  /**
+   * Контекстное меню. Пункты можно задавать двумя способами: обычным (id/icon/label/run)
+   * и готовой разметкой (html) — например, строка быстрых реакций, где внутри
+   * несколько кнопок. Для таких кнопок работает onUnknown: он получает их data-mi.
+   */
+  function openContextMenu(x, y, items, onUnknown = null) {
     const menu = $('#context-menu');
     menu.innerHTML = items.map((it) => it.html || `<button class="${it.danger ? 'danger' : ''}" data-mi="${it.id}">${it.icon || ''} ${esc(it.label)}</button>`).join('');
     menu.hidden = false;
@@ -1664,7 +1699,8 @@
     const onClick = (e) => {
       const btn = e.target.closest('[data-mi]');
       if (!btn) return;
-      const item = items.find((i) => i.id === btn.dataset.mi);
+      const id = btn.dataset.mi;
+      const item = items.find((i) => i.id === id) || (onUnknown ? { run: () => onUnknown(id, btn) } : null);
       close();
       if (item && item.run) item.run();
     };
@@ -1678,6 +1714,8 @@
     const isAdmin = chat && (chat.admins || []).includes(S.me && S.me.id);
     const quick = ['👍', '❤️', '😂', '🔥', '🎉', '😮', '😢', '🙏'];
     openContextMenu(x, y, [
+      // Быстрые реакции: кнопки внутри готовой разметки, поэтому клик ловит onUnknown
+      // (раньше обработчик искал пункт по id, не находил и реакция не отправлялась).
       { html: `<div class="emoji-quick">${quick.map((e) => `<button data-mi="react:${e}">${e}</button>`).join('')}</div>` },
       { id: 'reply', icon: '↩', label: 'Ответить', run: () => { S.replyTo = m.id; renderReplyPreview(); $('#input').focus(); } },
       { id: 'copy', icon: '📋', label: 'Копировать текст', run: () => { navigator.clipboard.writeText(m.text || '').then(() => toast('Скопировано', 'ok'), () => toast('Не удалось скопировать', 'err')); } },
@@ -1685,7 +1723,9 @@
       { id: 'pin', icon: '📌', label: 'Закрепить / открепить', run: () => wsSend({ type: 'message:pin', payload: { id: m.id } }) },
       { id: 'forward', icon: '➡️', label: 'Переслать', run: () => forwardMessage(m) },
       ...((mine || isAdmin) ? [{ id: 'del', icon: '🗑', label: 'Удалить', danger: true, run: () => { wsSend({ type: 'message:delete', payload: { id: m.id } }); const list = getList(m.chatId); const i = list.findIndex((x) => x.id === m.id); if (i >= 0) { list.splice(i, 1); renderMessages(); } } }] : []),
-    ].map((it) => it.id && it.id.startsWith('react:') ? { id: it.id, html: '' } : it));
+    ], (id) => {
+      if (id.startsWith('react:')) wsSend({ type: 'message:react', payload: { id: m.id, emoji: id.slice(6) } });
+    });
   }
 
   function forwardMessage(m) {

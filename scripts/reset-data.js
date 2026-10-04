@@ -40,12 +40,21 @@ const DATA_DIR = path.resolve(String(arg('data', process.env.DATA_DIR || default
 const DRY = has('dry-run');
 const ALL = has('all');
 
+/** Размер файла или папки целиком (вложенные каталоги тоже считаем). */
+function sizeOf(target) {
+  let stat;
+  try { stat = fs.statSync(target); } catch { return 0; }
+  if (!stat.isDirectory()) return stat.size;
+  let total = 0;
+  let entries = [];
+  try { entries = fs.readdirSync(target, { withFileTypes: true }); } catch { return 0; }
+  for (const entry of entries) total += sizeOf(path.join(target, entry.name));
+  return total;
+}
+
 function remove(target, label) {
   if (!fs.existsSync(target)) return 0;
-  const stat = fs.statSync(target);
-  const size = stat.isDirectory()
-    ? fs.readdirSync(target).reduce((acc, f) => acc + (fs.tryStat = (() => { try { return fs.statSync(path.join(target, f)); } catch { return { size: 0 }; } })()).size, 0)
-    : stat.size;
+  const size = sizeOf(target);
   if (DRY) {
     console.log(`  * [пробный запуск] удалил бы ${label}: ${target}`);
   } else {

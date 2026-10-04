@@ -17,6 +17,7 @@ const { createApi } = require('./src/api');
 const { seedDemo } = require('./src/seed');
 const { checkUpdate } = require('./src/update');
 const { AssistantBot } = require('./src/bots');
+const { forceDownload } = require('./src/security');
 
 /* ------------------------------------------------------------------ аргументы */
 
@@ -116,6 +117,13 @@ const core = new Core(store, null);
 const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '2mb' }));
+// Заголовки безопасности: браузер не «угадывает» тип файла и не передаёт наши
+// адреса наружу по ссылкам. CSP не ставим — клиент использует инлайн-разметку.
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  next();
+});
 
 /* ------------------------------------------------------- HTTPS (для звонков) */
 
@@ -207,8 +215,10 @@ function purgeDemoData() {
     const left = (chat.members || []).filter((id) => !demoIds.has(id));
     const hadDemo = left.length !== (chat.members || []).length;
     if (!hadDemo) continue;
-    // личный чат с демо-аккаунтом или группа, в которой не осталось людей — удаляем целиком
-    if (!left.length || (chat.type === 'direct' && !chat.isDemo)) {
+    // Личный чат, где второй участник был демо-аккаунтом, смысла не имеет —
+    // удаляем целиком (раньше такие «пустые» чаты оставались в списке).
+    // Группу удаляем, только если в ней не осталось людей.
+    if (!left.length || chat.type === 'direct') {
       for (const mid of store.data.chatMessages[chatId] || []) delete store.data.messages[mid];
       delete store.data.chatMessages[chatId];
       delete store.data.chats[chatId];
@@ -284,8 +294,20 @@ app.get('/health', (req, res) => res.json({
 /* --------------------------------------------------------------- статика веб */
 
 const indexFile = path.join(config.webDir, 'index.html');
-// Загруженные файлы неизменяемы — их можно кэшировать надолго.
-app.use('/uploads', express.static(config.uploadDir, { etag: true, maxAge: '7d', fallthrough: true }));
+// Загруженные файлы неизменяемы — их можно кэшировать надолго. Заголовки запрещают
+// браузеру «угадывать» тип содержимого, а всё, что не картинка/видео/звук/pdf,
+// отдаётся как скачивание, а не как страница.
+app.use('/uploads', express.static(config.uploadDir, {
+  etag: true,
+  maxAge: '7d',
+  fallthrough: true,
+  setHeaders(res, filePath) {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    const mime = res.getHeader('Content-Type') || '';
+    if (forceDownload(mime)) res.setHeader('Content-Disposition', 'attachment');
+    void filePath;
+  },
+}));
 // Клиент — всегда перепроверяем у сервера (ETag → 304, если не менялся):
 // после обновления сервера в браузере сразу видна новая версия, а не старый кэш.
 app.use(express.static(config.webDir, {

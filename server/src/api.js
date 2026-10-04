@@ -4,16 +4,20 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const { signToken, verifyToken, cleanText, newId } = require('./util');
-
-const MIME_EXT = {
-  'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp', 'image/gif': '.gif',
-  'video/mp4': '.mp4', 'video/webm': '.webm', 'audio/webm': '.webm', 'audio/ogg': '.ogg',
-  'audio/mpeg': '.mp3', 'audio/mp4': '.m4a', 'audio/wav': '.wav', 'application/pdf': '.pdf',
-  'text/plain': '.txt', 'application/zip': '.zip',
-};
+const { rateLimiter, clientIp, safeUploadExt } = require('./security');
 
 function createApi({ core, store, secret, config }) {
   const api = express.Router();
+
+  // Ограничители частоты: подбор пароля, массовая регистрация, заливка файлов.
+  const loginLimit = rateLimiter({ windowMs: 10 * 60_000, max: 10, name: 'login' });
+  const registerLimit = rateLimiter({ windowMs: 60 * 60_000, max: 30, name: 'register' });
+  const uploadLimit = rateLimiter({ windowMs: 10 * 60_000, max: 200, name: 'upload' });
+  const tooMany = (res, retryAfter) => {
+    res.set('Retry-After', String(retryAfter));
+    res.status(429).json({ error: `Слишком много попыток. Повторите через ${Math.ceil(retryAfter / 60)} мин.` });
+  };
+
   const auth = (req, res, next) => {
     const header = req.headers.authorization || '';
     const token = header.startsWith('Bearer ') ? header.slice(7) : (req.query.token || null);
@@ -51,6 +55,8 @@ function createApi({ core, store, secret, config }) {
 
   api.post('/auth/register', wrap((req, res) => {
     if (!config.registrationOpen) return res.status(403).json({ error: 'Регистрация закрыта' });
+    const limit = registerLimit.hit('ip:' + clientIp(req));
+    if (!limit.ok) return tooMany(res, limit.retryAfter);
     const { username, displayName, password, email } = req.body || {};
     const login = cleanText(username, 24).toLowerCase().replace(/[^a-z0-9_.-]/g, '');
     if (login.length < 3) return res.status(400).json({ error: 'Логин: минимум 3 символа (a-z, 0-9, _ . -)' });
@@ -63,10 +69,22 @@ function createApi({ core, store, secret, config }) {
 
   api.post('/auth/login', wrap((req, res) => {
     const { username, password } = req.body || {};
-    const user = store.findUserByName(cleanText(username, 24).replace(/^@/, ''));
-    if (!user) return res.status(401).json({ error: 'Пользователь не найден' });
+    const login = cleanText(username, 24).replace(/^@/, '').toLowerCase();
+    // Считаем неудачные попытки по паре «адрес + логин»: посторонний шум на
+    // другие аккаунты не мешает, а перебор пароля упирается в лимит.
+    const key = clientIp(req) + '|' + login;
     const { verifyPassword } = require('./util');
-    if (!verifyPassword(password || '', user.salt, user.hash)) return res.status(401).json({ error: 'Неверный пароль' });
+    const user = store.findUserByName(login);
+    const correct = !!user && verifyPassword(password || '', user.salt, user.hash);
+    if (!correct) {
+      // Считаем только НЕУДАЧНЫЕ попытки: перебор пароля упирается в лимит,
+      // а владелец аккаунта со своим паролем заходит в любой момент.
+      const limit = loginLimit.hit(key);
+      if (!limit.ok) return tooMany(res, limit.retryAfter);
+      // одинаковый текст ошибки: не подсказываем, есть такой логин или нет
+      return res.status(401).json({ error: 'Неверный логин или пароль' });
+    }
+    loginLimit.reset(key);
     user.lastSeen = Date.now();
     store.save();
     const token = signToken({ sub: user.id, login: user.username }, secret);
@@ -286,10 +304,15 @@ function createApi({ core, store, secret, config }) {
   api.post('/upload', auth, express.raw({ type: '*/*', limit: config.maxUploadMb * 1024 * 1024 }), wrap((req, res) => {
     const raw = req.body;
     if (!raw || !raw.length) return res.status(400).json({ error: 'Пустой файл' });
-    const originalName = decodeURIComponent(req.headers['x-file-name'] || 'file');
+    const limit = uploadLimit.hit('user:' + req.user.id);
+    if (!limit.ok) return tooMany(res, limit.retryAfter);
+
+    let originalName = String(req.headers['x-file-name'] || 'file');
+    try { originalName = decodeURIComponent(originalName); } catch { /* имя уже без кодирования */ }
     const mime = String(req.headers['x-file-mime'] || 'application/octet-stream').slice(0, 80);
     const id = newId('f');
-    const ext = path.extname(originalName).slice(0, 8) || MIME_EXT[mime] || '.bin';
+    // Расширение берём безопасное: имя приходит от браузера и ему доверять нельзя.
+    const ext = safeUploadExt(originalName, mime);
     const stored = id + ext;
     fs.mkdirSync(config.uploadDir, { recursive: true });
     fs.writeFileSync(path.join(config.uploadDir, stored), raw);
@@ -299,7 +322,7 @@ function createApi({ core, store, secret, config }) {
     const duration = Number(req.headers['x-duration']) || 0;
     const width = Number(req.headers['x-width']) || 0;
     const height = Number(req.headers['x-height']) || 0;
-    res.json({ file: { id, url: meta.url, name: meta.name, mime, size: meta.size, duration, width, height } });
+    res.json({ file: { id, url: meta.url, name: meta.name, mime: meta.mime, size: meta.size, duration, width, height, kind: /^image\//.test(mime) ? 'image' : /^video\//.test(mime) ? 'video' : /^audio\//.test(mime) ? 'audio' : 'file' } });
   }));
 
   return api;

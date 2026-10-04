@@ -30,6 +30,11 @@ jobs:
           for i in $(seq 1 20); do curl -sf http://localhost:4100/health >/dev/null && break || sleep 1; done
           node test/smoke.js http://localhost:4100
           node test/client-smoke.js http://localhost:4100
+          # полный сценарий: несколько человек, группы, вложения, прочтения,
+          # поиск, синхронизация, защита от дублей и флуда
+          node test/e2e.js http://localhost:4100
+          # интерфейс «руками»: меню сообщения, реакции, ответ, правка, пересылка, история
+          node test/client-flows.js http://localhost:4100
           # настоящий звонок: WebRTC, ICE, медиа, демонстрация экрана.
           # В облаке нет медиапутей, поэтому проверка соединения мягкая — сигналинг строгий.
           CALL_E2E_SOFT_MEDIA=1 node test/call-e2e.js http://localhost:4100
@@ -42,9 +47,26 @@ jobs:
           for i in $(seq 1 20); do curl -sf http://localhost:4200/health >/dev/null && break || sleep 1; done
           node test/smoke.js http://localhost:4200
           node test/client-smoke.js http://localhost:4200
+          node test/e2e.js http://localhost:4200
+          node test/client-flows.js http://localhost:4200
+          pkill -f "server.js --port 4200" || true
 
       - name: Сборка KonturServer.exe (Windows x64)
-        run: BUILD_LINUX_TOO=0 bash scripts/make-windows-exe.sh
+        run: BUILD_LINUX_TOO=1 bash scripts/make-windows-exe.sh
+
+      - name: Проверка собранной сборки «как у людей» (та же сборка под Linux)
+        run: |
+          cd server
+          rm -rf /tmp/kontur-exe
+          ../release/KonturServer-linux --port 4300 --data /tmp/kontur-exe --no-open --quiet &
+          for i in $(seq 1 30); do curl -sf http://localhost:4300/health >/dev/null && break || sleep 1; done
+          curl -sf http://localhost:4300/health | grep -q '"ok":true'
+          node test/smoke.js http://localhost:4300
+          node test/client-smoke.js http://localhost:4300
+          node test/e2e.js http://localhost:4300
+          node test/client-flows.js http://localhost:4300
+          CALL_E2E_SOFT_MEDIA=1 node test/call-e2e.js http://localhost:4300
+          pkill -f "KonturServer-linux" || true
 
       - name: Артефакт «KonturServer-windows»
         uses: actions/upload-artifact@v4
@@ -69,6 +91,21 @@ jobs:
 
             **Windows:** скачайте `KonturServer.exe`, положите в любую папку и запустите двойным кликом —
             поднимется сервер, откроется окно мессенджера, а в консоли появится адрес для друзей в локальной сети.
+
+            ### Что исправлено в 1.0.9 (аудит сервера и клиента)
+            - служебные сообщения («добавил(а) в группу», «создал(а) группу») приходят сразу, без перезагрузки;
+            - счётчик непрочитанных больше не срабатывает на служебные записи;
+            - повторная отправка не создаёт дубль сообщения (проверка по клиентскому id);
+            - отметка «прочитано» принимает только настоящие сообщения этого чата — счётчики не сбиваются;
+            - загруженный файл не может сохраниться как `.html`/`.svg`/`.js`, вложения принимаются
+              только со своего сервера — чужой скрипт на адресе сервера не выполнится;
+            - починена офлайн-очередь: сообщение без сети ждёт и уезжает, когда связь вернулась
+              (раньше падало с ошибкой и терялось);
+            - лимиты на перебор пароля, массовую регистрацию, заливку файлов и флуд по WebSocket;
+            - `--purge-demo` удаляет и личные чаты с демо-аккаунтами;
+            - у личного чата каждому участнику видно имя собеседника (а не своё);
+            - новые тесты: полный сценарий `server/test/e2e.js` + офлайн-очередь в клиентских тестах.
+            Подробнее — в `CHANGELOG.md`.
 
             **Любая ОС:** `git clone` → `cd server && npm install && node server.js`.
 

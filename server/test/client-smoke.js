@@ -87,7 +87,19 @@ async function rest(path, { method = 'GET', body, token } = {}) {
     virtualConsole: vc,
     beforeParse(window) {
       window.fetch = (input, init) => fetch(new URL(typeof input === 'string' ? input : input.url, BASE).href, init);
-      window.WebSocket = function (url) { return new WebSocketImpl(url); };
+      // «Выключатель» сети: с __wsGate.blocked = true соединение открыть нельзя,
+      // как будто пропал интернет. Нужен для проверки офлайн-очереди сообщений.
+      window.__wsGate = { blocked: false };
+      window.WebSocket = function (url) {
+        if (!window.__wsGate.blocked) {
+          const real = new WebSocketImpl(url);
+          window.__lastWs = real;   // чтобы тест мог «оборвать кабель» прямо сейчас
+          return real;
+        }
+        const stub = { readyState: 0, url, send() {}, close() {} };
+        setTimeout(() => { try { if (stub.onclose) stub.onclose(new window.Event('close')); } catch { /* уже закрыт */ } }, 30);
+        return stub;
+      };
       window.WebSocket.OPEN = 1;
       window.WebSocket.CONNECTING = 0;
       window.Element.prototype.scrollTo = function () {};
@@ -285,6 +297,38 @@ async function rest(path, { method = 'GET', body, token } = {}) {
   } else {
     skip('проверка бота — в обычном режиме бота нет (так и задумано)');
   }
+
+  console.log('\n— Офлайн: сообщение ждёт сети в очереди —');
+  window.K.openChat(group.id);
+  await sleep(200);
+  window.__wsGate.blocked = true;            // «выдёргиваем кабель»: обрываем текущий сокет и запрещаем новые
+  try { window.__lastWs && window.__lastWs.close(); } catch {}
+  await sleep(400);
+  const offlineText = 'Офлайн-сообщение ' + Math.random().toString(36).slice(2, 6);
+  $('#input').value = offlineText;
+  $('#input').dispatchEvent(new window.Event('input', { bubbles: true }));
+  $('#btn-send').click();
+  await sleep(400);
+  ok(window.K.S.outbox.some((p) => p.text === offlineText), 'сообщение без сети ушло в очередь, а не пропало');
+  ok($('#offline-banner').hidden === false, 'показана плашка «нет соединения»');
+  const waiting = $$('#messages-inner .msg.own').find((n) => n.textContent.includes(offlineText));
+  ok(!!waiting, 'сообщение видно в ленте со статусом «отправляется»');
+
+  window.__wsGate.blocked = false;           // сеть вернулась
+  const delivered = await waitFor(async () => {
+    const seen = await new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(false), 200);
+      const onMsg = (raw) => {
+        const msg = JSON.parse(raw.toString());
+        if (msg.type === 'message:new' && msg.payload.message.text === offlineText) { clearTimeout(timer); resolve(true); }
+      };
+      bws.on('message', onMsg);
+      setTimeout(() => bws.off('message', onMsg), 300);
+    });
+    return seen || window.K.S.outbox.length === 0;
+  }, 'отправка очереди после возврата сети', 15000);
+  ok(!!delivered, 'после возврата сети отложенное сообщение уехало на сервер');
+  ok(window.K.S.outbox.length === 0, 'очередь после отправки пуста');
 
   console.log('\n— Ошибки в консоли —');
   const real = errors.filter((e) => !/Not implemented|Could not load img|stylesheet/i.test(e));

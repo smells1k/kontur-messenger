@@ -62,6 +62,20 @@ class Core {
 
   memberIds(chatId) { return this.store.getChat(chatId)?.members || []; }
 
+  /**
+   * Системное сообщение («Аня создал(а) группу», «Борис добавил(а) Галину»).
+   * Раньше такие записи попадали только в историю и появлялись у людей лишь
+   * после перезагрузки — теперь они уходят в сокет как обычные сообщения.
+   */
+  systemMessage(chat, authorId, text) {
+    const msg = this.store.addMessage({ chatId: chat.id, authorId, system: true, text });
+    const view = this.publicMessage(msg);
+    for (const uid of chat.members) {
+      this.emit([uid], 'message:new', { chatId: chat.id, message: view, chat: this.chatView(chat, uid) });
+    }
+    return msg;
+  }
+
   /** Событие в журнал + мгновенная доставка всем подписчикам. */
   emit(userIds, type, payload) {
     const uniq = [...new Set(userIds)];
@@ -77,9 +91,11 @@ class Core {
     let chat = this.store.findDirectChat(aId, bId);
     if (!chat) {
       chat = this.store.createChat({ type: 'direct', memberIds: [aId, bId], createdBy: aId });
-      this.emit([aId, bId], 'chat:new', { chat: this.chatView(chat, aId) });
-      // каждому — своё представление чата (у direct-чата «своё» название для каждого)
+      // Каждому — своё событие: у личного чата «название» и аватар зависят от того,
+      // кто смотрит (это имя собеседника), поэтому одно общее событие давало
+      // одному из участников его же имя вместо имени друга.
       for (const uid of [aId, bId]) {
+        this.emit([uid], 'chat:new', { chatId: chat.id, chat: this.chatView(chat, uid) });
         this.hub.sendToUser(uid, { type: 'chat:upsert', payload: { chat: this.chatView(chat, uid) } });
       }
     }
@@ -91,11 +107,11 @@ class Core {
     if (members.length > MAX_GROUP_MEMBERS) throw Object.assign(new Error('Слишком много участников'), { status: 400 });
     const chat = this.store.createChat({ type: 'group', title: cleanText(title, 64) || 'Новая группа', memberIds: members, createdBy: ownerId, avatar, isDemo });
     const owner = this.store.getUser(ownerId);
-    this.store.addMessage({ chatId: chat.id, authorId: ownerId, system: true, text: `${owner.displayName} создал(а) группу «${chat.title}»` });
     for (const uid of members) {
       this.hub.sendToUser(uid, { type: 'chat:upsert', payload: { chat: this.chatView(chat, uid) } });
     }
     this.emit(members, 'chat:new', { chatId: chat.id });
+    this.systemMessage(chat, ownerId, `${owner.displayName} создал(а) группу «${chat.title}»`);
     return chat;
   }
 
@@ -123,7 +139,7 @@ class Core {
       if (this.store.addMember(chat, uid)) {
         addedCount++;
         const u = this.store.getUser(uid);
-        if (u) this.store.addMessage({ chatId, authorId: actorId, system: true, text: `${actor.displayName} добавил(а) ${u.displayName}` });
+        if (u) this.systemMessage(chat, actorId, `${actor.displayName} добавил(а) ${u.displayName}`);
       }
     }
     for (const uid of chat.members) this.hub.sendToUser(uid, { type: 'chat:upsert', payload: { chat: this.chatView(chat, uid) } });
@@ -139,7 +155,10 @@ class Core {
     const target = this.store.getUser(userId);
     if (!target) throw Object.assign(new Error('Пользователь не найден'), { status: 404 });
     this.store.removeMember(chat, userId);
-    this.store.addMessage({ chatId, authorId: actorId, system: true, text: `${actor.displayName} исключил(а) ${target.displayName}` });
+    const text = userId === actorId
+      ? `${actor.displayName} покинул(а) группу`
+      : `${actor.displayName} исключил(а) ${target.displayName}`;
+    this.systemMessage(chat, actorId, text);
     for (const uid of [...chat.members, userId]) this.hub.sendToUser(uid, { type: 'chat:upsert', payload: { chat: this.chatView(chat, uid) } });
     this.hub.sendToUser(userId, { type: 'chat:removed', payload: { chatId } });
     this.emit(chat.members, 'chat:refresh', { chatId });
@@ -167,7 +186,7 @@ class Core {
     if (!chat || !bot || chat.members.includes(botId)) return false;
     if (chat.members.length >= MAX_GROUP_MEMBERS) return false;
     this.store.addMember(chat, botId);
-    this.store.addMessage({ chatId, authorId: botId, system: true, text: `${bot.displayName} присоединился к группе (его позвали)` });
+    this.systemMessage(chat, botId, `${bot.displayName} присоединился к группе (его позвали)`);
     for (const uid of chat.members) this.hub.sendToUser(uid, { type: 'chat:upsert', payload: { chat: this.chatView(chat, uid) } });
     this.emit(chat.members, 'chat:refresh', { chatId });
     return true;
@@ -175,14 +194,45 @@ class Core {
 
   /* -------------------------------------------------------------- сообщения */
 
+  /**
+   * Вложение принимаем только то, что реально лежит в хранилище этого сервера.
+   * Так в сообщение нельзя подсунуть ссылку на чужой сайт или на файл, которого нет,
+   * а вместе с ним — ничего лишнего в базу.
+   */
+  normalizeAttachments(list) {
+    const files = [];
+    for (const raw of (Array.isArray(list) ? list : []).slice(0, 10)) {
+      if (!raw || typeof raw !== 'object') continue;
+      const url = String(raw.url || '');
+      const byId = raw.id ? this.store.data.uploadedFiles[raw.id] : null;
+      const meta = byId || Object.values(this.store.data.uploadedFiles).find((f) => f && f.url === url) || null;
+      if (!meta) throw Object.assign(new Error('Вложение не найдено: загрузите файл заново'), { status: 400 });
+      const kind = ['image', 'video', 'audio', 'voice', 'file'].includes(raw.kind)
+        ? raw.kind
+        : (/^image\//.test(meta.mime) ? 'image' : /^video\//.test(meta.mime) ? 'video' : /^audio\//.test(meta.mime) ? 'audio' : 'file');
+      files.push({
+        id: meta.id, url: meta.url, name: meta.name, mime: meta.mime, size: meta.size, kind,
+        duration: Number(raw.duration) || 0, width: Number(raw.width) || 0, height: Number(raw.height) || 0,
+      });
+    }
+    return files;
+  }
+
   sendMessage({ chatId, authorId, text, attachments = [], replyTo = null, clientId = null, system = false, createdAt }) {
     const chat = this.store.getChat(chatId);
     if (!chat) throw Object.assign(new Error('Чат не найден'), { status: 404 });
     const author = this.store.getUser(authorId);
     if (!author || !chat.members.includes(authorId)) throw Object.assign(new Error('Нет доступа к чату'), { status: 403 });
     const body = cleanText(text, 4096);
-    if (!body && !attachments.length) throw Object.assign(new Error('Пустое сообщение'), { status: 400 });
-    const msg = this.store.addMessage({ chatId, authorId, text: body, attachments, replyTo, clientId, system, createdAt });
+    const files = this.normalizeAttachments(attachments);
+    if (!body && !files.length) throw Object.assign(new Error('Пустое сообщение'), { status: 400 });
+    // Идемпотентность: если такое сообщение уже отправляли (повтор из очереди,
+    // переподключение, двойной клик) — возвращаем прежнее, а не плодим дубль.
+    if (clientId) {
+      const duplicate = this.store.findByClientId(chatId, authorId, clientId);
+      if (duplicate) return duplicate;
+    }
+    const msg = this.store.addMessage({ chatId, authorId, text: body, attachments: files, replyTo, clientId, system, createdAt });
     const view = this.publicMessage(msg);
     const event = { message: view, chatId };
     for (const uid of chat.members) {
@@ -256,7 +306,16 @@ class Core {
   markRead(userId, chatId, lastMessageId) {
     const chat = this.store.getChat(chatId);
     if (!chat || !chat.members.includes(userId)) return null;
-    const read = this.store.markRead(chatId, userId, lastMessageId);
+    const ids = this.store.messageIds(chatId);
+    const current = this.store.readState(chatId, userId).lastMessageId || null;
+    const currentIdx = current ? ids.indexOf(current) : -1;
+    // Принимаем только настоящее сообщение ЭТОГО чата и только движение «вперёд»:
+    // случайный или устаревший id не должен сбивать счётчики непрочитанных.
+    const target = lastMessageId && ids.includes(lastMessageId) ? lastMessageId : null;
+    if (!target || (currentIdx >= 0 && ids.indexOf(target) <= currentIdx)) {
+      return this.store.readState(chatId, userId);
+    }
+    const read = this.store.markRead(chatId, userId, target);
     this.emit(chat.members, 'read', { chatId, userId, lastMessageId: read.lastMessageId, ts: read.ts });
     return read;
   }

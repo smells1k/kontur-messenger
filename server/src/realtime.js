@@ -4,6 +4,12 @@
  */
 const { WebSocketServer } = require('ws');
 const { verifyToken } = require('./util');
+const { rateLimiter } = require('./security');
+
+/** Больше мегабайта в одном кадре быть не должно: это либо ошибка, либо флуд. */
+const MAX_FRAME_BYTES = 1024 * 1024;
+const WS_MSG_WINDOW_MS = 10_000;
+const WS_MSG_LIMIT = 300;
 
 class Hub {
   constructor({ server, store, core, secret, path = '/ws' }) {
@@ -11,8 +17,9 @@ class Hub {
     this.core = core;
     this.secret = secret;
     this.sockets = new Map(); // ws -> { userId, alive, id }
-    this.wss = new WebSocketServer({ noServer: true });
+    this.wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
     this.stats = { connections: 0, messagesIn: 0, messagesOut: 0 };
+    this.floodLimit = rateLimiter({ windowMs: WS_MSG_WINDOW_MS, max: WS_MSG_LIMIT, name: 'ws' });
 
     server.on('upgrade', (req, socket, head) => {
       const url = new URL(req.url, 'http://localhost');
@@ -170,6 +177,14 @@ class Hub {
     const st = this.sockets.get(ws);
     if (!st) return;
 
+    // Флуд по сокету: больше ~30 команд в секунду от одного клиента быть не должно.
+    const flood = this.floodLimit.hit(st.ip || 'unknown');
+    if (!flood.ok) {
+      this.send(ws, { type: 'error', payload: { message: 'Слишком много команд подряд — соединение закрыто' } });
+      try { ws.close(1008, 'flood'); } catch {}
+      return;
+    }
+
     // --- до авторизации разрешены только auth/sync/ping
     if (!st.userId) {
       if (msg.type === 'auth') return void this.authenticate(ws, msg.token, msg.since || 0);
@@ -179,7 +194,18 @@ class Hub {
 
     const me = st.userId;
     const p = msg.payload || msg.data || {};
-    const fail = (err) => this.send(ws, { type: 'error', payload: { message: err.message || 'Ошибка', request: msg.type, requestId: msg.requestId || null } });
+    const fail = (err) => this.send(ws, {
+      type: 'error',
+      payload: {
+        message: err.message || 'Ошибка',
+        request: msg.type,
+        requestId: msg.requestId || null,
+        // клиент по этим полям убирает «часики» у неотправленного сообщения
+        clientId: p.clientId || null,
+        chatId: p.chatId || null,
+        id: p.id || null,
+      },
+    });
 
     try {
       switch (msg.type) {
