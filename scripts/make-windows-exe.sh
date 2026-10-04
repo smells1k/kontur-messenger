@@ -81,14 +81,14 @@ cd "$ROOT"
 echo "▶︎ Кладу рядом веб-клиент и инструкцию…"
 rm -rf release/web; cp -r web release/web
 [ -f README-KLIENT.txt ] && cp README-KLIENT.txt release/ || true
-[ -f scripts/reset-data.bat ] && cp scripts/reset-data.bat release/ОЧИСТИТЬ-ДАННЫЕ.bat || true
+[ -f scripts/reset-data.bat ] && cp scripts/reset-data.bat release/reset-data.bat || true
 [ -f scripts/reset-data.js ] && cp scripts/reset-data.js release/reset-data.js || true
 
 echo ""
 echo "✅ Готово!"
 ls -lh release/KonturServer.exe | awk '{print "   release/KonturServer.exe — " $5}'
 echo "   release/web/  — веб-клиент (та же папка, что отдаёт сервер)"
-echo "   release/ОЧИСТИТЬ-ДАННЫЕ.bat — двойной клик = полная зачистка базы"
+echo "   release/reset-data.bat   — двойной клик = полная зачистка базы"
 echo "   версия сборки: $VERSION ($BUILD_DATE)"
 echo ""
 echo "Как это работает на Windows:"

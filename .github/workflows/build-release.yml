@@ -51,7 +51,7 @@ jobs:
           path: |
             release/KonturServer.exe
             release/README-KLIENT.txt
-            release/ОЧИСТИТЬ-ДАННЫЕ.bat
+            release/reset-data.bat
             release/reset-data.js
           if-no-files-found: error
 
@@ -84,11 +84,11 @@ jobs:
             `--https` — HTTPS с самоподписанным сертификатом (камера, микрофон и демонстрация экрана
             в браузере по IP работают только так) · `--port 4100`, `--data D:\chat`, `--closed`, `--browser`.
 
-            В архиве рядом с `.exe` лежит **`ОЧИСТИТЬ-ДАННЫЕ.bat`** — двойной клик полностью очищает сервер.
+            В архиве рядом с `.exe` лежит **`reset-data.bat`** — двойной клик полностью очищает сервер.
           files: |
             release/KonturServer.exe
             release/README-KLIENT.txt
-            release/ОЧИСТИТЬ-ДАННЫЕ.bat
+            release/reset-data.bat
             release/reset-data.js
           draft: false
           allowUpdates: true
